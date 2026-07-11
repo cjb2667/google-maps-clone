@@ -7,19 +7,18 @@ import ZoomControls from './components/ZoomControls'
 import LocateButton from './components/LocateButton'
 import Toolbar from './components/Toolbar'
 import {
-  HILLSHADE_LAYER_ID,
   ROADMAP_ATTRIBUTION,
   ROADMAP_LAYER_ID,
   SATELLITE_ATTRIBUTION,
   SATELLITE_LAYER_ID,
-  TERRAIN_EXAGGERATION,
-  TERRAIN_SOURCE,
+  setTerrainEnabled,
   type LayerType,
 } from './lib/mapConfig'
 import { MapProvider } from './lib/MapContext'
 import { locateAndFly } from './lib/userLocation'
 import type { GeocodeResult } from './lib/geocode'
 import { randomPlace, type Place } from './lib/places'
+import CompassButton from './components/CompassButton'
 import './styles/app.css'
 
 // 测距 / 卷帘按需加载,减小首屏 JS
@@ -155,21 +154,13 @@ export default function App() {
     })
   }, [])
 
-  /** 3D 地形开关:设置 terrain + 山体阴影,并调整俯仰角 */
+  /** 3D 地形开关:按需挂载 DEM + 山体阴影,并调整俯仰角 */
   const handleToggleTerrain = useCallback(() => {
     if (!map) return
     setTerrainOn((on) => {
       const next = !on
-      if (next) {
-        map.setTerrain({ source: TERRAIN_SOURCE, exaggeration: TERRAIN_EXAGGERATION })
-        map.setLayoutProperty(HILLSHADE_LAYER_ID, 'visibility', 'visible')
-        // 自动倾斜视角,突出 3D 效果
-        map.easeTo({ pitch: 60, duration: 1200 })
-      } else {
-        map.setTerrain(null)
-        map.setLayoutProperty(HILLSHADE_LAYER_ID, 'visibility', 'none')
-        map.easeTo({ pitch: 0, duration: 1200 })
-      }
+      setTerrainEnabled(map, next)
+      map.easeTo({ pitch: next ? 60 : 0, duration: 1200 })
       return next
     })
   }, [map])
@@ -237,8 +228,9 @@ export default function App() {
           </div>
         )}
 
-        {/* 右下角:定位按钮 + 缩放按钮组 */}
+        {/* 右下角:指北复位 + 定位 + 缩放 */}
         <div className="app__bottom-right">
+          <CompassButton />
           <LocateButton onError={showToast} />
           <ZoomControls
             onZoomIn={() => map?.zoomIn({ duration: 300 })}

@@ -1,4 +1,4 @@
-import type { StyleSpecification } from 'maplibre-gl'
+import type { Map as MapLibreMap, StyleSpecification } from 'maplibre-gl'
 import type { Feature, Polygon } from 'geojson'
 
 /** 图层类型:路网(roadmap)与卫星(satellite),对应谷歌地图的"地图/卫星"切换 */
@@ -27,9 +27,21 @@ export const TERRAIN_EXAGGERATION = 1.3
 /** AWS 开放高程瓦片(Terrarium 编码,免费无需密钥) */
 const DEM_TILES = ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png']
 
+/** 低 DPR 或省流模式用 1x 瓦片,否则用 @2x */
+function roadmapTileUrls(): string[] {
+  const saveData =
+    typeof navigator !== 'undefined' &&
+    (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData
+  const lowDpr = typeof window !== 'undefined' && window.devicePixelRatio < 1.5
+  const suffix = saveData || lowDpr ? '.png' : '@2x.png'
+  return ['a', 'b', 'c', 'd'].map(
+    (s) => `https://${s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}${suffix}`,
+  )
+}
+
 /**
- * 地图样式:同时包含路网与卫星两个栅格源,
- * 通过图层 visibility 切换,避免 setStyle 重建导致定位图层丢失
+ * 地图样式:仅含路网与卫星栅格源。
+ * DEM / hillshade 在首次开启 3D 时再挂载,避免冷启动拉高程瓦片。
  */
 export const MAP_STYLE: StyleSpecification = {
   version: 8,
@@ -37,12 +49,7 @@ export const MAP_STYLE: StyleSpecification = {
     // 路网:CARTO Voyager 栅格瓦片,配色接近谷歌地图默认样式,免费无需密钥
     roadmap: {
       type: 'raster',
-      tiles: [
-        'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
-        'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
-        'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
-        'https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
-      ],
+      tiles: roadmapTileUrls(),
       tileSize: 256,
       maxzoom: 20,
     },
@@ -54,21 +61,6 @@ export const MAP_STYLE: StyleSpecification = {
       ],
       tileSize: 256,
       maxzoom: 19,
-    },
-    // 3D 地形高程源(terrain 与 hillshade 分开引用,避免相互干扰)
-    [TERRAIN_SOURCE]: {
-      type: 'raster-dem',
-      tiles: DEM_TILES,
-      encoding: 'terrarium',
-      tileSize: 256,
-      maxzoom: 15,
-    },
-    [HILLSHADE_SOURCE]: {
-      type: 'raster-dem',
-      tiles: DEM_TILES,
-      encoding: 'terrarium',
-      tileSize: 256,
-      maxzoom: 15,
     },
   },
   layers: [
@@ -85,15 +77,56 @@ export const MAP_STYLE: StyleSpecification = {
       // 卫星图层默认隐藏
       layout: { visibility: 'none' },
     },
-    {
-      // 山体阴影放在两种底图之上,卫星 + 3D 时也能看见立体感(默认隐藏)
+  ],
+}
+
+/**
+ * 按需挂载 DEM + hillshade(幂等)。
+ * 开启 3D 地形前调用,避免首屏加载高程瓦片。
+ */
+export function ensureTerrainSources(map: MapLibreMap): void {
+  if (!map.getSource(TERRAIN_SOURCE)) {
+    map.addSource(TERRAIN_SOURCE, {
+      type: 'raster-dem',
+      tiles: DEM_TILES,
+      encoding: 'terrarium',
+      tileSize: 256,
+      maxzoom: 15,
+    })
+  }
+  if (!map.getSource(HILLSHADE_SOURCE)) {
+    map.addSource(HILLSHADE_SOURCE, {
+      type: 'raster-dem',
+      tiles: DEM_TILES,
+      encoding: 'terrarium',
+      tileSize: 256,
+      maxzoom: 15,
+    })
+  }
+  if (!map.getLayer(HILLSHADE_LAYER_ID)) {
+    map.addLayer({
+      // 山体阴影放在两种底图之上,卫星 + 3D 时也能看见立体感
       id: HILLSHADE_LAYER_ID,
       type: 'hillshade',
       source: HILLSHADE_SOURCE,
       layout: { visibility: 'none' },
       paint: { 'hillshade-exaggeration': 0.4 },
-    },
-  ],
+    })
+  }
+}
+
+/** 开启或关闭 3D 地形与山影 */
+export function setTerrainEnabled(map: MapLibreMap, enabled: boolean): void {
+  if (enabled) {
+    ensureTerrainSources(map)
+    map.setTerrain({ source: TERRAIN_SOURCE, exaggeration: TERRAIN_EXAGGERATION })
+    map.setLayoutProperty(HILLSHADE_LAYER_ID, 'visibility', 'visible')
+  } else {
+    map.setTerrain(null)
+    if (map.getLayer(HILLSHADE_LAYER_ID)) {
+      map.setLayoutProperty(HILLSHADE_LAYER_ID, 'visibility', 'none')
+    }
+  }
 }
 
 /**

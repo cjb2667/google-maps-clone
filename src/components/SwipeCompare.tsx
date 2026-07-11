@@ -4,8 +4,7 @@ import {
   makeStyle,
   ROADMAP_LAYER_ID,
   SATELLITE_LAYER_ID,
-  TERRAIN_EXAGGERATION,
-  TERRAIN_SOURCE,
+  setTerrainEnabled,
   type LayerType,
 } from '../lib/mapConfig'
 import { useMap } from '../lib/useMap'
@@ -59,22 +58,30 @@ export default function SwipeCompare({ active, compareLayer, terrainOn }: SwipeC
       interactive: false,
       attributionControl: false,
       maxPitch: 70,
+      // 栅格底图无需淡入动画,减少叠绘开销
+      fadeDuration: 0,
     })
     compareMapRef.current = compareMap
 
-    // 主图相机变化时同步到对比图
+    // 主图相机变化时用 rAF 合并同步,避免 move 事件风暴打满双 WebGL
+    let raf = 0
     const sync = () => {
-      compareMap.jumpTo({
-        center: map.getCenter(),
-        zoom: map.getZoom(),
-        bearing: map.getBearing(),
-        pitch: map.getPitch(),
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        compareMap.jumpTo({
+          center: map.getCenter(),
+          zoom: map.getZoom(),
+          bearing: map.getBearing(),
+          pitch: map.getPitch(),
+        })
       })
     }
     map.on('move', sync)
 
     return () => {
       map.off('move', sync)
+      cancelAnimationFrame(raf)
       compareMap.remove()
       compareMapRef.current = null
     }
@@ -102,15 +109,11 @@ export default function SwipeCompare({ active, compareLayer, terrainOn }: SwipeC
     else compareMap.once('load', apply)
   }, [active, compareLayer])
 
-  // 3D 地形开关同步到对比图
+  // 3D 地形开关同步到对比图(按需挂载 DEM)
   useEffect(() => {
     const compareMap = compareMapRef.current
     if (!compareMap || !active) return
-    const apply = () => {
-      compareMap.setTerrain(
-        terrainOn ? { source: TERRAIN_SOURCE, exaggeration: TERRAIN_EXAGGERATION } : null,
-      )
-    }
+    const apply = () => setTerrainEnabled(compareMap, terrainOn)
     if (compareMap.isStyleLoaded()) apply()
     else compareMap.once('load', apply)
   }, [active, terrainOn])
@@ -123,6 +126,8 @@ export default function SwipeCompare({ active, compareLayer, terrainOn }: SwipeC
   // 拖拽滑块:直接改 DOM,避免每帧 setState
   const handlePointerDown = (e: ReactPointerEvent) => {
     e.preventDefault()
+    const target = e.currentTarget
+    target.setPointerCapture(e.pointerId)
     const parent = overlayRef.current
     if (!parent) return
     const rect = parent.getBoundingClientRect()
@@ -131,12 +136,19 @@ export default function SwipeCompare({ active, compareLayer, terrainOn }: SwipeC
       // 两侧各保留 5%,避免滑块被拖出可视范围
       applyRatio(Math.min(0.95, Math.max(0.05, next)))
     }
-    const onUp = () => {
+    const onUp = (ev: PointerEvent) => {
+      try {
+        target.releasePointerCapture(ev.pointerId)
+      } catch {
+        // 已释放时忽略
+      }
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }
 
   if (!active) return null
