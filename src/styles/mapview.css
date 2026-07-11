@@ -1,0 +1,5 @@
+/* 地图容器铺满父级 */
+.map-container {
+  position: absolute;
+  inset: 0;
+}

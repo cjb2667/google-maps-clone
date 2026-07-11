@@ -1,0 +1,48 @@
+/* 全局样式:铺满视口,使用谷歌地图同款 Roboto 字体 */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: Roboto, 'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  padding: 0;
+}
+
+/* MapLibre 比例尺:还原谷歌地图的简洁样式 */
+.maplibregl-ctrl-bottom-right {
+  /* 给右下角自定义控件组让位 */
+  right: 0;
+  bottom: 22px;
+  margin-right: 76px;
+}
+
+.maplibregl-ctrl-scale {
+  background: transparent;
+  border: 2px solid rgba(0, 0, 0, 0.55);
+  border-top: none;
+  color: #202124;
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 0 5px;
+  text-shadow:
+    0 0 2px #fff,
+    0 0 2px #fff;
+}

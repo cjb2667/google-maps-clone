@@ -1,0 +1,46 @@
+/* 卷帘对比整体覆盖层:本身不拦截事件,交互穿透到主地图 */
+.swipe-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* 第二张地图铺满全屏,由 clip-path 控制可见区域 */
+.swipe-overlay__map {
+  position: absolute;
+  inset: 0;
+}
+
+/* 卷帘分割线 + 拖拽手柄 */
+.swipe-overlay__handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  margin-left: -2px;
+  background: #fff;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
+  pointer-events: auto;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.swipe-overlay__grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #1a73e8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.swipe-overlay__handle:hover .swipe-overlay__grip {
+  background: #1765cc;
+}

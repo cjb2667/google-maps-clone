@@ -1,0 +1,64 @@
+/* 整体布局:控件悬浮层 */
+.app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* 左下角控件组(图层切换卡片) */
+.app__bottom-left {
+  position: absolute;
+  left: 24px;
+  bottom: 32px;
+  z-index: 10;
+}
+
+/* 右下角控件组(定位 + 缩放),纵向排列 */
+.app__bottom-right {
+  position: absolute;
+  right: 12px;
+  bottom: 44px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+/* 底部版权条:仿谷歌地图的半透明白底小字 */
+.app__attribution {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.8);
+  color: #202124;
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 2px 8px;
+}
+
+.app__attribution a {
+  color: #202124;
+  text-decoration: none;
+}
+
+.app__attribution a:hover {
+  text-decoration: underline;
+}
+
+/* 提示气泡(定位失败等),底部居中 */
+.app__toast {
+  position: absolute;
+  left: 50%;
+  bottom: 48px;
+  transform: translateX(-50%);
+  z-index: 20;
+  background: #202124;
+  color: #fff;
+  font-size: 14px;
+  padding: 12px 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  max-width: 80vw;
+}

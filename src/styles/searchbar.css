@@ -1,0 +1,138 @@
+/* 搜索框 + 下拉结果的定位容器 */
+.search-bar-root {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+  width: 392px;
+  max-width: calc(100vw - 24px);
+}
+
+/* 左上角搜索框:白底圆角 + Material 阴影,还原谷歌地图外观 */
+.search-bar {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 48px;
+  background: #fff;
+  border-radius: 24px;
+  box-shadow:
+    0 1px 2px rgba(60, 64, 67, 0.3),
+    0 2px 6px 2px rgba(60, 64, 67, 0.15);
+  padding: 0 6px;
+}
+
+/* 下拉展开时,搜索框只保留上方圆角,与结果列表连成一体 */
+.search-bar--open {
+  border-radius: 24px 24px 0 0;
+}
+
+.search-bar__input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  font-size: 15px;
+  color: #202124;
+  padding: 0 4px;
+  background: transparent;
+}
+
+.search-bar__input::placeholder {
+  color: #5f6368;
+}
+
+.search-bar__icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.search-bar__icon-btn:hover {
+  background: rgba(60, 64, 67, 0.08);
+}
+
+/* 路线按钮左侧的细分隔线 */
+.search-bar__directions {
+  border-left: 1px solid #e8eaed;
+  border-radius: 0 50% 50% 0;
+}
+
+/* 搜索加载中的旋转圈 */
+.search-bar__spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #e8eaed;
+  border-top-color: #4285f4;
+  border-radius: 50%;
+  animation: search-spin 0.8s linear infinite;
+}
+
+@keyframes search-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 搜索结果下拉列表 */
+.search-results {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0;
+  background: #fff;
+  border-top: 1px solid #e8eaed;
+  border-radius: 0 0 16px 16px;
+  box-shadow:
+    0 1px 2px rgba(60, 64, 67, 0.3),
+    0 2px 6px 2px rgba(60, 64, 67, 0.15);
+  overflow: hidden;
+}
+
+.search-results__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+
+.search-results__item--active {
+  background: rgba(60, 64, 67, 0.08);
+}
+
+.search-results__pin {
+  flex-shrink: 0;
+}
+
+.search-results__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.search-results__primary {
+  font-size: 14px;
+  color: #202124;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-results__secondary {
+  font-size: 12px;
+  color: #5f6368;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-results__empty {
+  padding: 12px 16px;
+  font-size: 14px;
+  color: #5f6368;
+}
