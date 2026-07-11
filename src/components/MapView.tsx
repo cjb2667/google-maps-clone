@@ -1,50 +1,72 @@
 import { useEffect, useRef } from 'react'
 import maplibregl from 'maplibre-gl'
-import { DEFAULT_CENTER, DEFAULT_ZOOM, MAP_STYLE } from '../lib/mapConfig'
+import {
+  captureBasemapLayerIds,
+  DEFAULT_CENTER,
+  DEFAULT_ZOOM,
+  loadMapStyle,
+} from '../lib/mapConfig'
 import '../styles/mapview.css'
 
 interface MapViewProps {
   /** 地图实例创建完成后回调,供父组件持有实例操作图层/相机 */
   onMapReady: (map: maplibregl.Map) => void
+  /** 矢量样式加载失败时回调 */
+  onError?: (message: string) => void
 }
 
 /**
- * MapLibre 地图容器:负责初始化地图、比例尺控件,
- * 拖拽平移 / 滚轮缩放 / 双击缩放 / Ctrl+拖拽旋转倾斜 均为 MapLibre 默认交互
+ * MapLibre 地图容器:异步加载 OpenFreeMap 矢量样式后初始化,
+ * 拖拽平移 / 滚轮缩放 / 双击缩放 / Ctrl+拖拽旋转倾斜 均为默认交互
  */
-export default function MapView({ onMapReady }: MapViewProps) {
+export default function MapView({ onMapReady, onError }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
+    let cancelled = false
+    let map: maplibregl.Map | null = null
 
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: MAP_STYLE,
-      center: DEFAULT_CENTER,
-      zoom: DEFAULT_ZOOM,
-      // 关闭默认版权控件,由底部自定义版权条统一展示
-      attributionControl: false,
-      // 稍微放宽最大倾斜角,接近谷歌地图 3D 手感
-      maxPitch: 70,
-      // 栅格底图无需淡入动画,减少叠绘开销
-      fadeDuration: 0,
-    })
+    const init = async () => {
+      try {
+        const style = await loadMapStyle()
+        if (cancelled || !containerRef.current) return
 
-    // 比例尺(谷歌地图位于右下角)
-    map.addControl(new maplibregl.ScaleControl({ maxWidth: 90, unit: 'metric' }), 'bottom-right')
+        map = new maplibregl.Map({
+          container: containerRef.current,
+          style,
+          center: DEFAULT_CENTER,
+          zoom: DEFAULT_ZOOM,
+          attributionControl: false,
+          maxPitch: 70,
+          fadeDuration: 0,
+        })
 
-    mapRef.current = map
-    onMapReady(map)
+        map.addControl(new maplibregl.ScaleControl({ maxWidth: 90, unit: 'metric' }), 'bottom-right')
 
-    // 开发模式下暴露地图实例,便于调试与自动化验证
-    if (import.meta.env.DEV) {
-      ;(window as unknown as { __map?: maplibregl.Map }).__map = map
+        map.once('load', () => {
+          if (cancelled || !map) {
+            map?.remove()
+            return
+          }
+          captureBasemapLayerIds(map)
+          mapRef.current = map
+          onMapReady(map)
+          if (import.meta.env.DEV) {
+            ;(window as unknown as { __map?: maplibregl.Map }).__map = map
+          }
+        })
+      } catch {
+        if (!cancelled) onError?.('矢量地图样式加载失败,请检查网络后刷新')
+      }
     }
 
+    void init()
+
     return () => {
-      map.remove()
+      cancelled = true
+      map?.remove()
       mapRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

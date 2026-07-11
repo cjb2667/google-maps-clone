@@ -11,20 +11,21 @@ npm run dev
 
 ## 功能
 
-- **地图浏览**:拖拽平移、滚轮/双击缩放、Ctrl+拖拽旋转倾斜(MapLibre WebGL 渲染)
-- **地点搜索**:左上角搜索框接入 OSM Nominatim,防抖联想、键盘选择、清除标记
-- **图层切换**:路网(CARTO Voyager)与卫星(Esri World Imagery),左下角卡片带缩略图预览
-- **测距 / 测面积**:点击加点、双击结束、闭合测面积、拖拽顶点、撤销上一点
-- **卷帘对比**:路网与卫星同屏对比,拖动滑块切换可见区域
-- **3D 地形**:AWS Terrarium DEM + 山体阴影,支持倾斜俯视
-- **随机传送**:飞往精选自然奇观 / 地标(云旅游)
-- **定位**:右下角定位按钮通过 Geolocation API 绘制蓝点 + 精度圈并 flyTo;已授权时打开页面会自动定位
-- **指北复位**:旋转或倾斜后显示指南针按钮,一键回正
-- **谷歌风格 UI**:搜索框、缩放与定位控件(Material 阴影)、比例尺与版权署名
+- **矢量路网**:OpenFreeMap Liberty 矢量底图(道路/建筑/标注可缩放清晰渲染)
+- **卫星图层**:Esri World Imagery,左下角卡片一键切换
+- **地点搜索**:Nominatim 防抖联想、键盘选择、清除标记、视野偏置
+- **路线规划**:OSRM 驾车 / 步行 / 骑行;搜索或点击地图设起终点,绘制路线并显示时长距离
+- **测距 / 测面积**:加点、闭合、拖拽顶点、撤销
+- **卷帘对比**:路网与卫星同屏对比
+- **3D 地形**:AWS Terrarium DEM + 山体阴影(按需加载)
+- **随机传送**:飞往精选自然奇观 / 地标
+- **定位与指北**:Geolocation 蓝点 + 精度圈;旋转后可一键复位
+- **谷歌风格 UI**:搜索框、工具栏、缩放控件、比例尺与版权署名
 
 ## 数据来源与署名
 
-- 路网瓦片:© OpenStreetMap contributors © CARTO
+- 矢量路网:© OpenStreetMap contributors © OpenFreeMap
 - 卫星瓦片:© Esri — Source: Esri, Maxar, Earthstar Geographics
 - 地理编码:© OpenStreetMap contributors (Nominatim)
+- 路线规划:OSRM (Open Source Routing Machine)
 - 高程:AWS Terrain Tiles (Terrarium)
