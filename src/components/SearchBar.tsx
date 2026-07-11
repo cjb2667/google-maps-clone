@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { searchPlaces, type GeocodeResult } from '../lib/geocode'
+import { useMap } from '../lib/useMap'
 import '../styles/searchbar.css'
 
 interface SearchBarProps {
@@ -16,6 +17,7 @@ interface SearchBarProps {
  * 输入防抖联想 + 回车直接搜索,选中后飞到目标位置
  */
 export default function SearchBar({ onSelect, onClear, onError }: SearchBarProps) {
+  const map = useMap()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<GeocodeResult[]>([])
   const [open, setOpen] = useState(false)
@@ -34,7 +36,12 @@ export default function SearchBar({ onSelect, onClear, onError }: SearchBarProps
     abortRef.current = controller
     setLoading(true)
     try {
-      const list = await searchPlaces(q, controller.signal)
+      // 带上当前视野,软偏置本地结果
+      const b = map?.getBounds()
+      const viewbox: [number, number, number, number] | undefined = b
+        ? [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]
+        : undefined
+      const list = await searchPlaces(q, { signal: controller.signal, viewbox })
       setResults(list)
       setOpen(true)
       setHighlight(-1)

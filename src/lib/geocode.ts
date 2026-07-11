@@ -17,6 +17,14 @@ export interface GeocodeResult {
   bbox: [number, number, number, number] | null
 }
 
+/** 搜索可选参数 */
+export interface SearchPlacesOptions {
+  signal?: AbortSignal
+  limit?: number
+  /** 当前视野 [west, south, east, north],用于偏置本地结果 */
+  viewbox?: [number, number, number, number]
+}
+
 /** Nominatim 返回的原始条目(只声明用到的字段) */
 interface NominatimItem {
   place_id: number
@@ -35,9 +43,9 @@ interface NominatimItem {
  */
 export async function searchPlaces(
   query: string,
-  signal?: AbortSignal,
-  limit = 5,
+  options: SearchPlacesOptions = {},
 ): Promise<GeocodeResult[]> {
+  const { signal, limit = 5, viewbox } = options
   const params = new URLSearchParams({
     format: 'jsonv2',
     q: query,
@@ -45,6 +53,11 @@ export async function searchPlaces(
     // 优先返回中文名称
     'accept-language': 'zh-CN,zh,en',
   })
+  // 软偏置当前视野(bounded=0 不强制限制在框内)
+  if (viewbox) {
+    params.set('viewbox', viewbox.join(','))
+    params.set('bounded', '0')
+  }
   const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
     signal,
     headers: {
