@@ -29,6 +29,9 @@ interface NominatimItem {
 /**
  * 搜索地点,返回最多 limit 条结果。
  * 传入 AbortSignal 以便在用户继续输入时取消过期请求。
+ *
+ * 说明:浏览器无法自定义 User-Agent;请遵守 Nominatim 用量政策
+ * (合理频率、展示 OSM 署名)。生产环境建议走自建代理。
  */
 export async function searchPlaces(
   query: string,
@@ -42,7 +45,15 @@ export async function searchPlaces(
     // 优先返回中文名称
     'accept-language': 'zh-CN,zh,en',
   })
-  const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, { signal })
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+    signal,
+    headers: {
+      Accept: 'application/json',
+      // 标识应用来源,便于服务端区分流量(浏览器仍会带默认 UA)
+      'Accept-Language': 'zh-CN,zh,en',
+    },
+  })
+  if (res.status === 429) throw new Error('搜索过于频繁,请稍后再试')
   if (!res.ok) throw new Error(`搜索服务响应异常: ${res.status}`)
   const items = (await res.json()) as NominatimItem[]
 

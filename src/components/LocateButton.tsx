@@ -1,10 +1,9 @@
 import { useState } from 'react'
-import type maplibregl from 'maplibre-gl'
 import { locateAndFly } from '../lib/userLocation'
+import { useMap } from '../lib/useMap'
 import '../styles/locatebutton.css'
 
 interface LocateButtonProps {
-  map: maplibregl.Map | null
   /** 定位失败时向上抛出提示文案 */
   onError: (message: string) => void
 }
@@ -13,7 +12,8 @@ interface LocateButtonProps {
  * 右下角"定位到我的位置"按钮:
  * 调用浏览器 Geolocation API,成功后 flyTo 并绘制蓝点+精度圈
  */
-export default function LocateButton({ map, onError }: LocateButtonProps) {
+export default function LocateButton({ onError }: LocateButtonProps) {
+  const map = useMap()
   const [locating, setLocating] = useState(false)
 
   const handleClick = () => {
@@ -28,6 +28,7 @@ export default function LocateButton({ map, onError }: LocateButtonProps) {
       onClick={handleClick}
       aria-label="显示您的位置"
       title="显示您的位置"
+      type="button"
     >
       {/* 谷歌地图的准星定位图标 */}
       <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">

@@ -28,8 +28,6 @@ export default function MapView({ onMapReady }: MapViewProps) {
       attributionControl: false,
       // 稍微放宽最大倾斜角,接近谷歌地图 3D 手感
       maxPitch: 70,
-      // 保留绘制缓冲,保证截图/取帧能拿到画面内容
-      canvasContextAttributes: { preserveDrawingBuffer: true },
     })
 
     // 比例尺(谷歌地图位于右下角)
