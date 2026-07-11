@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import MapView from './components/MapView'
 import SearchBar from './components/SearchBar'
@@ -10,19 +10,33 @@ import CompassButton from './components/CompassButton'
 import {
   ROADMAP_ATTRIBUTION,
   SATELLITE_ATTRIBUTION,
+  WEATHER_ATTRIBUTION,
   setBasemap,
+  setMapTheme,
   setTerrainEnabled,
   type LayerType,
+  type MapDisplay,
 } from './lib/mapConfig'
+import {
+  getSystemTheme,
+  loadThemeSetting,
+  resolveTheme,
+  saveThemeSetting,
+  type Theme,
+  type ThemeSetting,
+} from './lib/theme'
 import { MapProvider } from './lib/MapContext'
 import { locateAndFly } from './lib/userLocation'
 import type { GeocodeResult } from './lib/geocode'
 import { randomPlace, type Place } from './lib/places'
+import type { SwipeMode } from './components/SwipeCompare'
 import './styles/app.css'
 
 const MeasureTool = lazy(() => import('./components/MeasureTool'))
 const SwipeCompare = lazy(() => import('./components/SwipeCompare'))
 const DirectionsPanel = lazy(() => import('./components/DirectionsPanel'))
+const WeatherOverlay = lazy(() => import('./components/WeatherOverlay'))
+const FlightMode = lazy(() => import('./components/FlightMode'))
 const TimeMachine = lazy(() => import('./components/TimeMachine'))
 const FlightsLayer = lazy(() => import('./components/FlightsLayer'))
 const IssLayer = lazy(() => import('./components/IssLayer'))
@@ -41,16 +55,40 @@ export default function App() {
   const toastTimer = useRef<number | undefined>(undefined)
   const searchMarkerRef = useRef<maplibregl.Marker | null>(null)
 
-  // 独占模式:路线 / 测距 / 卷帘 / 时光机(同屏交互冲突,互斥)
+  // 独占模式:抢占地图点击或全屏对比,互斥开启
   const [directionsOn, setDirectionsOn] = useState(false)
   const [measureOn, setMeasureOn] = useState(false)
   const [swipeOn, setSwipeOn] = useState(false)
+  const [swipeMode, setSwipeMode] = useState<SwipeMode>('basemap')
+  const [weatherOn, setWeatherOn] = useState(false)
+  const [flightOn, setFlightOn] = useState(false)
   const [timeMachineOn, setTimeMachineOn] = useState(false)
-  // 叠加图层:3D / 航班 / ISS(可与任意模式共存)
+  // 叠加图层:可与任意模式共存
   const [terrainOn, setTerrainOn] = useState(false)
   const [flightsOn, setFlightsOn] = useState(false)
   const [issOn, setIssOn] = useState(false)
   const lastPlaceRef = useRef<Place | undefined>(undefined)
+
+  // 日夜主题:用户设置(auto/light/dark)+ 系统偏好 → 实际主题
+  const [themeSetting, setThemeSetting] = useState<ThemeSetting>(() => loadThemeSetting())
+  const [systemTheme, setSystemTheme] = useState<Theme>(() => getSystemTheme())
+  const theme = resolveTheme(themeSetting, systemTheme)
+  // MapView 只在初始化时用一次主题,后续切换走 setMapTheme
+  const initialThemeRef = useRef(theme)
+
+  // 监听系统深色模式变化(auto 模式下自动联动)
+  useEffect(() => {
+    const mql = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = (e: MediaQueryListEvent) => setSystemTheme(e.matches ? 'dark' : 'light')
+    mql.addEventListener('change', onChange)
+    return () => mql.removeEventListener('change', onChange)
+  }, [])
+
+  // 主题变化时应用到主图
+  useEffect(() => {
+    if (!map) return
+    setMapTheme(map, theme)
+  }, [map, theme])
 
   const handleMapReady = useCallback((m: maplibregl.Map) => {
     setMap(m)
@@ -132,48 +170,61 @@ export default function App() {
     [map],
   )
 
-  /** 关闭所有独占模式 */
-  const closeExclusiveModes = useCallback(() => {
-    setDirectionsOn(false)
-    setMeasureOn(false)
-    setSwipeOn(false)
-    setTimeMachineOn(false)
-  }, [])
+  /**
+   * 抢占地图点击的模式(路线/测距/天气/飞行/时光机)与卷帘相互互斥:
+   * 开启任意一个时关闭其余
+   */
+  const exclusiveToggle = useCallback(
+    (
+      setter: React.Dispatch<React.SetStateAction<boolean>>,
+      opts: { clearSearch?: boolean; onEnable?: () => void } = {},
+    ) => {
+      setter((on) => {
+        if (!on) {
+          // 关闭除自身外的其他抢占模式
+          const others = [
+            setDirectionsOn,
+            setMeasureOn,
+            setSwipeOn,
+            setWeatherOn,
+            setFlightOn,
+            setTimeMachineOn,
+          ]
+          for (const s of others) {
+            if (s !== setter) s(false)
+          }
+          if (opts.clearSearch) handleSearchClear()
+          opts.onEnable?.()
+        }
+        return !on
+      })
+    },
+    [handleSearchClear],
+  )
 
-  const handleToggleDirections = useCallback(() => {
-    setDirectionsOn((on) => {
-      if (!on) {
-        closeExclusiveModes()
-        handleSearchClear()
-      }
-      return !on
-    })
-  }, [closeExclusiveModes, handleSearchClear])
-
-  const handleToggleMeasure = useCallback(() => {
-    setMeasureOn((on) => {
-      if (!on) closeExclusiveModes()
-      return !on
-    })
-  }, [closeExclusiveModes])
-
-  const handleToggleSwipe = useCallback(() => {
-    setSwipeOn((on) => {
-      if (!on) closeExclusiveModes()
-      return !on
-    })
-  }, [closeExclusiveModes])
+  const handleToggleDirections = useCallback(
+    () => exclusiveToggle(setDirectionsOn, { clearSearch: true }),
+    [exclusiveToggle],
+  )
+  const handleToggleMeasure = useCallback(
+    () => exclusiveToggle(setMeasureOn),
+    [exclusiveToggle],
+  )
+  const handleToggleSwipe = useCallback(() => exclusiveToggle(setSwipeOn), [exclusiveToggle])
+  const handleToggleWeather = useCallback(
+    () => exclusiveToggle(setWeatherOn),
+    [exclusiveToggle],
+  )
+  const handleToggleFlight = useCallback(
+    () => exclusiveToggle(setFlightOn),
+    [exclusiveToggle],
+  )
 
   /** 时光机:开启时切主图为卫星,便于"过去 vs 现在"对比 */
-  const handleToggleTimeMachine = useCallback(() => {
-    setTimeMachineOn((on) => {
-      if (!on) {
-        closeExclusiveModes()
-        handleSwitchLayer('satellite')
-      }
-      return !on
-    })
-  }, [closeExclusiveModes, handleSwitchLayer])
+  const handleToggleTimeMachine = useCallback(
+    () => exclusiveToggle(setTimeMachineOn, { onEnable: () => handleSwitchLayer('satellite') }),
+    [exclusiveToggle, handleSwitchLayer],
+  )
 
   const handleToggleTerrain = useCallback(() => {
     if (!map) return
@@ -187,6 +238,21 @@ export default function App() {
 
   const handleToggleFlights = useCallback(() => setFlightsOn((on) => !on), [])
   const handleToggleIss = useCallback(() => setIssOn((on) => !on), [])
+
+  /** 主题循环:跟随系统 → 白天 → 黑夜 → 跟随系统 */
+  const handleCycleTheme = useCallback(() => {
+    setThemeSetting((cur) => {
+      const next: ThemeSetting = cur === 'auto' ? 'light' : cur === 'light' ? 'dark' : 'auto'
+      saveThemeSetting(next)
+      const labels: Record<ThemeSetting, string> = {
+        auto: '主题:跟随系统',
+        light: '主题:白天',
+        dark: '主题:黑夜',
+      }
+      showToast(labels[next])
+      return next
+    })
+  }, [showToast])
 
   const handleTeleport = useCallback(() => {
     if (!map) return
@@ -204,23 +270,41 @@ export default function App() {
     showToast(`已传送到:${place.name}(${place.country})`)
   }, [map, terrainOn, handleSwitchLayer, showToast])
 
-  const attributionHtml = timeMachineOn
-    ? `${WAYBACK_ATTRIBUTION} | ${SATELLITE_ATTRIBUTION}`
-    : swipeOn
-      ? `${ROADMAP_ATTRIBUTION} | ${SATELLITE_ATTRIBUTION}`
-      : activeLayer === 'roadmap'
-        ? ROADMAP_ATTRIBUTION
-        : SATELLITE_ATTRIBUTION
+  /** 主图当前展示状态(供卷帘对比取"另一面") */
+  const mainDisplay = useMemo<MapDisplay>(
+    () => ({ basemap: activeLayer, theme }),
+    [activeLayer, theme],
+  )
+
+  /** 版权署名:卷帘/时光机/天气等场景组合展示 */
+  const attribution = useMemo(() => {
+    const parts: string[] = []
+    if (timeMachineOn) {
+      parts.push(WAYBACK_ATTRIBUTION, SATELLITE_ATTRIBUTION)
+    } else if (swipeOn && swipeMode === 'basemap') {
+      parts.push(ROADMAP_ATTRIBUTION, SATELLITE_ATTRIBUTION)
+    } else {
+      parts.push(activeLayer === 'roadmap' ? ROADMAP_ATTRIBUTION : SATELLITE_ATTRIBUTION)
+    }
+    if (weatherOn) parts.push(WEATHER_ATTRIBUTION)
+    return parts.join(' | ')
+  }, [timeMachineOn, swipeOn, swipeMode, activeLayer, weatherOn])
 
   return (
     <MapProvider value={map}>
       <div className="app">
-        <MapView onMapReady={handleMapReady} onError={showToast} />
+        <MapView
+          onMapReady={handleMapReady}
+          onError={showToast}
+          initialTheme={initialThemeRef.current}
+        />
 
         <Suspense fallback={null}>
           <SwipeCompare
             active={swipeOn}
-            compareLayer={activeLayer === 'roadmap' ? 'satellite' : 'roadmap'}
+            mode={swipeMode}
+            onModeChange={setSwipeMode}
+            mainDisplay={mainDisplay}
             terrainOn={terrainOn}
           />
           <TimeMachine active={timeMachineOn} onError={showToast} />
@@ -242,16 +326,22 @@ export default function App() {
           measureOn={measureOn}
           swipeOn={swipeOn}
           terrainOn={terrainOn}
+          weatherOn={weatherOn}
+          flightOn={flightOn}
           timeMachineOn={timeMachineOn}
           flightsOn={flightsOn}
           issOn={issOn}
+          themeSetting={themeSetting}
           onToggleDirections={handleToggleDirections}
           onToggleMeasure={handleToggleMeasure}
           onToggleSwipe={handleToggleSwipe}
           onToggleTerrain={handleToggleTerrain}
+          onToggleWeather={handleToggleWeather}
+          onToggleFlight={handleToggleFlight}
           onToggleTimeMachine={handleToggleTimeMachine}
           onToggleFlights={handleToggleFlights}
           onToggleIss={handleToggleIss}
+          onCycleTheme={handleCycleTheme}
           onTeleport={handleTeleport}
         />
 
@@ -262,6 +352,8 @@ export default function App() {
             onError={showToast}
           />
           <MeasureTool active={measureOn} onExit={() => setMeasureOn(false)} />
+          <WeatherOverlay active={weatherOn} onError={showToast} />
+          <FlightMode active={flightOn} onExit={() => setFlightOn(false)} />
         </Suspense>
 
         {/* 卷帘/时光机下两种影像同屏,隐藏图层切换卡片 */}
@@ -280,7 +372,10 @@ export default function App() {
           />
         </div>
 
-        <div className="app__attribution" dangerouslySetInnerHTML={{ __html: attributionHtml }} />
+        <div
+          className="app__attribution"
+          dangerouslySetInnerHTML={{ __html: attribution }}
+        />
 
         {toast && (
           <div className="app__toast" role="alert">

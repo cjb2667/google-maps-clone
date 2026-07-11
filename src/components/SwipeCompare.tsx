@@ -1,33 +1,74 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react'
 import maplibregl from 'maplibre-gl'
 import {
-  applyBasemapVisibility,
-  captureVisibilitySnapshot,
-  loadCompareStyle,
+  applyMapDisplay,
+  loadMapStyle,
+  registerMapDisplay,
   setTerrainEnabled,
-  type LayerType,
-  type VisibilitySnapshot,
+  type MapDisplay,
 } from '../lib/mapConfig'
 import { useMap } from '../lib/useMap'
 import '../styles/swipe.css'
 
+/** 卷帘对比模式:底图(路网/卫星)、2D/3D、日/夜 */
+export type SwipeMode = 'basemap' | 'terrain' | 'theme'
+
 interface SwipeCompareProps {
   active: boolean
-  /** 对比图(右侧)展示的图层,取主图当前图层的"另一个" */
-  compareLayer: LayerType
-  /** 3D 地形是否开启(开启时对比图同步启用地形) */
+  /** 当前对比模式 */
+  mode: SwipeMode
+  onModeChange: (mode: SwipeMode) => void
+  /** 主图当前展示状态 */
+  mainDisplay: MapDisplay
+  /** 主图 3D 地形是否开启 */
   terrainOn: boolean
+}
+
+/** 计算对比图(右侧)的展示状态:取主图对应维度的"另一面" */
+function compareDisplayFor(mode: SwipeMode, main: MapDisplay): MapDisplay {
+  switch (mode) {
+    case 'basemap':
+      return { basemap: main.basemap === 'roadmap' ? 'satellite' : 'roadmap', theme: main.theme }
+    case 'terrain':
+      return { ...main }
+    case 'theme':
+      return { basemap: 'roadmap', theme: main.theme === 'dark' ? 'light' : 'dark' }
+  }
+}
+
+/** 两侧标签文案 [左(主图), 右(对比图)] */
+function sideLabels(mode: SwipeMode, main: MapDisplay, terrainOn: boolean): [string, string] {
+  switch (mode) {
+    case 'basemap':
+      return main.basemap === 'roadmap' ? ['路网', '卫星'] : ['卫星', '路网']
+    case 'terrain':
+      return terrainOn ? ['3D', '2D'] : ['2D', '3D']
+    case 'theme':
+      return main.theme === 'dark' ? ['黑夜', '白天'] : ['白天', '黑夜']
+  }
+}
+
+const MODE_LABELS: Record<SwipeMode, string> = {
+  basemap: '路网 / 卫星',
+  terrain: '2D / 3D',
+  theme: '日 / 夜',
 }
 
 /**
  * 卷帘对比:在主地图上方叠加第二张地图(pointer-events: none,交互穿透到主图),
- * 通过 clip-path 只显示滑块右侧部分,相机跟随主图实时同步
+ * 通过 clip-path 只显示滑块右侧部分,相机跟随主图实时同步。
+ * 支持三种对比维度:底图、2D/3D 地形、日夜主题
  */
-export default function SwipeCompare({ active, compareLayer, terrainOn }: SwipeCompareProps) {
+export default function SwipeCompare({
+  active,
+  mode,
+  onModeChange,
+  mainDisplay,
+  terrainOn,
+}: SwipeCompareProps) {
   const map = useMap()
   const containerRef = useRef<HTMLDivElement>(null)
   const compareMapRef = useRef<maplibregl.Map | null>(null)
-  const snapshotRef = useRef<VisibilitySnapshot | null>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
   const mapClipRef = useRef<HTMLDivElement>(null)
   const handleRef = useRef<HTMLDivElement>(null)
@@ -53,8 +94,9 @@ export default function SwipeCompare({ active, compareLayer, terrainOn }: SwipeC
 
     const init = async () => {
       try {
-        // compareLayer 初值仅用于首帧;后续变化由下方 effect 切换显隐
-        const style = await loadCompareStyle(compareLayer)
+        // 初始展示状态仅用于首帧;后续模式/主题变化由下方 effect 切换
+        const display = compareDisplayFor(mode, mainDisplay)
+        const style = await loadMapStyle(display)
         if (cancelled || !containerRef.current) return
 
         compareMap = new maplibregl.Map({
@@ -69,11 +111,8 @@ export default function SwipeCompare({ active, compareLayer, terrainOn }: SwipeC
           maxPitch: 70,
           fadeDuration: 0,
         })
+        registerMapDisplay(compareMap, display)
         compareMapRef.current = compareMap
-
-        compareMap.once('load', () => {
-          if (compareMap) snapshotRef.current = captureVisibilitySnapshot(compareMap)
-        })
 
         let raf = 0
         const sync = () => {
@@ -104,32 +143,29 @@ export default function SwipeCompare({ active, compareLayer, terrainOn }: SwipeC
       detachSync?.()
       compareMap?.remove()
       compareMapRef.current = null
-      snapshotRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, active])
 
-  // 对比图层切换(含随机传送切主图为卫星的场景):按快照显隐,不重建地图
+  // 模式 / 主图状态变化:更新对比图显隐与地形,不重建地图
   useEffect(() => {
     const compareMap = compareMapRef.current
     if (!compareMap || !active) return
     const apply = () => {
-      const snap = snapshotRef.current ?? captureVisibilitySnapshot(compareMap)
-      snapshotRef.current = snap
-      applyBasemapVisibility(compareMap, snap, compareLayer)
+      applyMapDisplay(compareMap, compareDisplayFor(mode, mainDisplay))
+      // 2D/3D 模式下对比图地形取主图的反面,其余模式与主图一致
+      const compareTerrain = mode === 'terrain' ? !terrainOn : terrainOn
+      setTerrainEnabled(compareMap, compareTerrain)
     }
     if (compareMap.isStyleLoaded()) apply()
     else compareMap.once('load', apply)
-  }, [active, compareLayer])
+  }, [active, mode, mainDisplay, terrainOn])
 
-  // 3D 地形开关同步到对比图
+  // 切到 2D/3D 对比且主图视角很平时,自动倾斜以突出地形差异
   useEffect(() => {
-    const compareMap = compareMapRef.current
-    if (!compareMap || !active) return
-    const apply = () => setTerrainEnabled(compareMap, terrainOn)
-    if (compareMap.isStyleLoaded()) apply()
-    else compareMap.once('load', apply)
-  }, [active, terrainOn])
+    if (!map || !active || mode !== 'terrain') return
+    if (map.getPitch() < 30) map.easeTo({ pitch: 60, duration: 1200 })
+  }, [map, active, mode])
 
   useEffect(() => {
     if (active) applyRatio(0.5)
@@ -163,6 +199,8 @@ export default function SwipeCompare({ active, compareLayer, terrainOn }: SwipeC
 
   if (!active) return null
 
+  const [leftLabel, rightLabel] = sideLabels(mode, mainDisplay, terrainOn)
+
   return (
     <div className="swipe-overlay" ref={overlayRef}>
       <div
@@ -173,6 +211,29 @@ export default function SwipeCompare({ active, compareLayer, terrainOn }: SwipeC
         className="swipe-overlay__map"
         style={{ clipPath: `inset(0 0 0 ${ratioRef.current * 100}%)` }}
       />
+
+      {/* 对比模式切换(顶部居中分段控件) */}
+      <div className="swipe-overlay__modes" role="tablist" aria-label="卷帘对比模式">
+        {(Object.keys(MODE_LABELS) as SwipeMode[]).map((m) => (
+          <button
+            key={m}
+            role="tab"
+            aria-selected={m === mode}
+            className={`swipe-overlay__mode-btn${m === mode ? ' swipe-overlay__mode-btn--active' : ''}`}
+            onClick={() => onModeChange(m)}
+            type="button"
+          >
+            {MODE_LABELS[m]}
+          </button>
+        ))}
+      </div>
+
+      {/* 两侧内容标签 */}
+      <span className="swipe-overlay__side-label swipe-overlay__side-label--left">{leftLabel}</span>
+      <span className="swipe-overlay__side-label swipe-overlay__side-label--right">
+        {rightLabel}
+      </span>
+
       <div
         ref={handleRef}
         className="swipe-overlay__handle"

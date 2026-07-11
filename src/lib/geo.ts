@@ -44,6 +44,44 @@ export function polygonArea(coords: [number, number][]): number {
   return Math.abs((total * EARTH_RADIUS * EARTH_RADIUS) / 2)
 }
 
+/**
+ * 球面插值(Slerp):沿大圆弧从 a 到 b,t∈[0,1],返回 [lng, lat]。
+ * 用于飞行模式沿最短航线推进相机
+ */
+export function slerp(a: [number, number], b: [number, number], t: number): [number, number] {
+  const toVec = ([lng, lat]: [number, number]) => {
+    const φ = toRad(lat)
+    const λ = toRad(lng)
+    return [Math.cos(φ) * Math.cos(λ), Math.cos(φ) * Math.sin(λ), Math.sin(φ)]
+  }
+  const va = toVec(a)
+  const vb = toVec(b)
+  const dot = Math.min(1, Math.max(-1, va[0] * vb[0] + va[1] * vb[1] + va[2] * vb[2]))
+  const ω = Math.acos(dot)
+  // 两点几乎重合时退化为线性插值,避免除零
+  if (ω < 1e-9) {
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+  }
+  const k1 = Math.sin((1 - t) * ω) / Math.sin(ω)
+  const k2 = Math.sin(t * ω) / Math.sin(ω)
+  const x = k1 * va[0] + k2 * vb[0]
+  const y = k1 * va[1] + k2 * vb[1]
+  const z = k1 * va[2] + k2 * vb[2]
+  const lat = (Math.atan2(z, Math.sqrt(x * x + y * y)) * 180) / Math.PI
+  const lng = (Math.atan2(y, x) * 180) / Math.PI
+  return [lng, lat]
+}
+
+/** a 指向 b 的初始方位角(度,0=正北,顺时针) */
+export function bearingBetween(a: [number, number], b: [number, number]): number {
+  const φ1 = toRad(a[1])
+  const φ2 = toRad(b[1])
+  const Δλ = toRad(b[0] - a[0])
+  const y = Math.sin(Δλ) * Math.cos(φ2)
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ)
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360
+}
+
 /** 距离格式化:小于 1km 显示米,否则显示公里 */
 export function formatDistance(meters: number): string {
   if (meters < 1000) return `${meters.toFixed(meters < 100 ? 1 : 0)} 米`
