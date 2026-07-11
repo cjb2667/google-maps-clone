@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import MapView from './components/MapView'
 import SearchBar from './components/SearchBar'
@@ -10,19 +10,33 @@ import CompassButton from './components/CompassButton'
 import {
   ROADMAP_ATTRIBUTION,
   SATELLITE_ATTRIBUTION,
+  WEATHER_ATTRIBUTION,
   setBasemap,
+  setMapTheme,
   setTerrainEnabled,
   type LayerType,
+  type MapDisplay,
 } from './lib/mapConfig'
+import {
+  getSystemTheme,
+  loadThemeSetting,
+  resolveTheme,
+  saveThemeSetting,
+  type Theme,
+  type ThemeSetting,
+} from './lib/theme'
 import { MapProvider } from './lib/MapContext'
 import { locateAndFly } from './lib/userLocation'
 import type { GeocodeResult } from './lib/geocode'
 import { randomPlace, type Place } from './lib/places'
+import type { SwipeMode } from './components/SwipeCompare'
 import './styles/app.css'
 
 const MeasureTool = lazy(() => import('./components/MeasureTool'))
 const SwipeCompare = lazy(() => import('./components/SwipeCompare'))
 const DirectionsPanel = lazy(() => import('./components/DirectionsPanel'))
+const WeatherOverlay = lazy(() => import('./components/WeatherOverlay'))
+const FlightMode = lazy(() => import('./components/FlightMode'))
 
 /**
  * 整体布局:地图铺满全屏,各控件绝对定位悬浮在地图之上
@@ -37,8 +51,32 @@ export default function App() {
   const [directionsOn, setDirectionsOn] = useState(false)
   const [measureOn, setMeasureOn] = useState(false)
   const [swipeOn, setSwipeOn] = useState(false)
+  const [swipeMode, setSwipeMode] = useState<SwipeMode>('basemap')
   const [terrainOn, setTerrainOn] = useState(false)
+  const [weatherOn, setWeatherOn] = useState(false)
+  const [flightOn, setFlightOn] = useState(false)
   const lastPlaceRef = useRef<Place | undefined>(undefined)
+
+  // 日夜主题:用户设置(auto/light/dark)+ 系统偏好 → 实际主题
+  const [themeSetting, setThemeSetting] = useState<ThemeSetting>(() => loadThemeSetting())
+  const [systemTheme, setSystemTheme] = useState<Theme>(() => getSystemTheme())
+  const theme = resolveTheme(themeSetting, systemTheme)
+  // MapView 只在初始化时用一次主题,后续切换走 setMapTheme
+  const initialThemeRef = useRef(theme)
+
+  // 监听系统深色模式变化(auto 模式下自动联动)
+  useEffect(() => {
+    const mql = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = (e: MediaQueryListEvent) => setSystemTheme(e.matches ? 'dark' : 'light')
+    mql.addEventListener('change', onChange)
+    return () => mql.removeEventListener('change', onChange)
+  }, [])
+
+  // 主题变化时应用到主图
+  useEffect(() => {
+    if (!map) return
+    setMapTheme(map, theme)
+  }, [map, theme])
 
   const handleMapReady = useCallback((m: maplibregl.Map) => {
     setMap(m)
@@ -120,37 +158,47 @@ export default function App() {
     [map],
   )
 
-  /** 路线 / 测距 / 卷帘互斥;进入路线时清掉搜索标记 */
-  const handleToggleDirections = useCallback(() => {
-    setDirectionsOn((on) => {
-      if (!on) {
-        setMeasureOn(false)
-        setSwipeOn(false)
-        handleSearchClear()
-      }
-      return !on
-    })
-  }, [handleSearchClear])
+  /**
+   * 抢占地图点击的模式(路线/测距/天气/飞行)与卷帘相互互斥:
+   * 开启任意一个时关闭其余
+   */
+  const exclusiveToggle = useCallback(
+    (
+      setter: React.Dispatch<React.SetStateAction<boolean>>,
+      opts: { clearSearch?: boolean } = {},
+    ) => {
+      setter((on) => {
+        if (!on) {
+          // 关闭除自身外的其他抢占模式
+          const others = [setDirectionsOn, setMeasureOn, setSwipeOn, setWeatherOn, setFlightOn]
+          for (const s of others) {
+            if (s !== setter) s(false)
+          }
+          if (opts.clearSearch) handleSearchClear()
+        }
+        return !on
+      })
+    },
+    [handleSearchClear],
+  )
 
-  const handleToggleMeasure = useCallback(() => {
-    setMeasureOn((on) => {
-      if (!on) {
-        setDirectionsOn(false)
-        setSwipeOn(false)
-      }
-      return !on
-    })
-  }, [])
-
-  const handleToggleSwipe = useCallback(() => {
-    setSwipeOn((on) => {
-      if (!on) {
-        setDirectionsOn(false)
-        setMeasureOn(false)
-      }
-      return !on
-    })
-  }, [])
+  const handleToggleDirections = useCallback(
+    () => exclusiveToggle(setDirectionsOn, { clearSearch: true }),
+    [exclusiveToggle],
+  )
+  const handleToggleMeasure = useCallback(
+    () => exclusiveToggle(setMeasureOn),
+    [exclusiveToggle],
+  )
+  const handleToggleSwipe = useCallback(() => exclusiveToggle(setSwipeOn), [exclusiveToggle])
+  const handleToggleWeather = useCallback(
+    () => exclusiveToggle(setWeatherOn),
+    [exclusiveToggle],
+  )
+  const handleToggleFlight = useCallback(
+    () => exclusiveToggle(setFlightOn),
+    [exclusiveToggle],
+  )
 
   const handleToggleTerrain = useCallback(() => {
     if (!map) return
@@ -161,6 +209,21 @@ export default function App() {
       return next
     })
   }, [map])
+
+  /** 主题循环:跟随系统 → 白天 → 黑夜 → 跟随系统 */
+  const handleCycleTheme = useCallback(() => {
+    setThemeSetting((cur) => {
+      const next: ThemeSetting = cur === 'auto' ? 'light' : cur === 'light' ? 'dark' : 'auto'
+      saveThemeSetting(next)
+      const labels: Record<ThemeSetting, string> = {
+        auto: '主题:跟随系统',
+        light: '主题:白天',
+        dark: '主题:黑夜',
+      }
+      showToast(labels[next])
+      return next
+    })
+  }, [showToast])
 
   const handleTeleport = useCallback(() => {
     if (!map) return
@@ -178,15 +241,39 @@ export default function App() {
     showToast(`已传送到:${place.name}(${place.country})`)
   }, [map, terrainOn, handleSwitchLayer, showToast])
 
+  /** 主图当前展示状态(供卷帘对比取"另一面") */
+  const mainDisplay = useMemo<MapDisplay>(
+    () => ({ basemap: activeLayer, theme }),
+    [activeLayer, theme],
+  )
+
+  /** 版权署名:卷帘或黑夜等场景组合展示 */
+  const attribution = useMemo(() => {
+    const parts: string[] = []
+    if (swipeOn && swipeMode === 'basemap') {
+      parts.push(ROADMAP_ATTRIBUTION, SATELLITE_ATTRIBUTION)
+    } else {
+      parts.push(activeLayer === 'roadmap' ? ROADMAP_ATTRIBUTION : SATELLITE_ATTRIBUTION)
+    }
+    if (weatherOn) parts.push(WEATHER_ATTRIBUTION)
+    return parts.join(' | ')
+  }, [swipeOn, swipeMode, activeLayer, weatherOn])
+
   return (
     <MapProvider value={map}>
       <div className="app">
-        <MapView onMapReady={handleMapReady} onError={showToast} />
+        <MapView
+          onMapReady={handleMapReady}
+          onError={showToast}
+          initialTheme={initialThemeRef.current}
+        />
 
         <Suspense fallback={null}>
           <SwipeCompare
             active={swipeOn}
-            compareLayer={activeLayer === 'roadmap' ? 'satellite' : 'roadmap'}
+            mode={swipeMode}
+            onModeChange={setSwipeMode}
+            mainDisplay={mainDisplay}
             terrainOn={terrainOn}
           />
         </Suspense>
@@ -205,10 +292,16 @@ export default function App() {
           measureOn={measureOn}
           swipeOn={swipeOn}
           terrainOn={terrainOn}
+          weatherOn={weatherOn}
+          flightOn={flightOn}
+          themeSetting={themeSetting}
           onToggleDirections={handleToggleDirections}
           onToggleMeasure={handleToggleMeasure}
           onToggleSwipe={handleToggleSwipe}
           onToggleTerrain={handleToggleTerrain}
+          onToggleWeather={handleToggleWeather}
+          onToggleFlight={handleToggleFlight}
+          onCycleTheme={handleCycleTheme}
           onTeleport={handleTeleport}
         />
 
@@ -219,6 +312,8 @@ export default function App() {
             onError={showToast}
           />
           <MeasureTool active={measureOn} onExit={() => setMeasureOn(false)} />
+          <WeatherOverlay active={weatherOn} onError={showToast} />
+          <FlightMode active={flightOn} onExit={() => setFlightOn(false)} />
         </Suspense>
 
         {!swipeOn && (
@@ -238,13 +333,7 @@ export default function App() {
 
         <div
           className="app__attribution"
-          dangerouslySetInnerHTML={{
-            __html: swipeOn
-              ? `${ROADMAP_ATTRIBUTION} | ${SATELLITE_ATTRIBUTION}`
-              : activeLayer === 'roadmap'
-                ? ROADMAP_ATTRIBUTION
-                : SATELLITE_ATTRIBUTION,
-          }}
+          dangerouslySetInnerHTML={{ __html: attribution }}
         />
 
         {toast && (

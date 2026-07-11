@@ -1,11 +1,12 @@
 import { useEffect, useRef } from 'react'
 import maplibregl from 'maplibre-gl'
 import {
-  captureBasemapLayerIds,
   DEFAULT_CENTER,
   DEFAULT_ZOOM,
   loadMapStyle,
+  registerMapDisplay,
 } from '../lib/mapConfig'
+import type { Theme } from '../lib/theme'
 import '../styles/mapview.css'
 
 interface MapViewProps {
@@ -13,15 +14,19 @@ interface MapViewProps {
   onMapReady: (map: maplibregl.Map) => void
   /** 矢量样式加载失败时回调 */
   onError?: (message: string) => void
+  /** 初始日夜主题(仅初始化时生效,后续切换由父组件调用 setMapTheme) */
+  initialTheme: Theme
 }
 
 /**
- * MapLibre 地图容器:异步加载 OpenFreeMap 矢量样式后初始化,
+ * MapLibre 地图容器:异步加载合并矢量样式(亮/暗/卫星)后初始化,
  * 拖拽平移 / 滚轮缩放 / 双击缩放 / Ctrl+拖拽旋转倾斜 均为默认交互
  */
-export default function MapView({ onMapReady, onError }: MapViewProps) {
+export default function MapView({ onMapReady, onError, initialTheme }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
+  // 仅取首次渲染的主题,避免主题切换触发地图重建
+  const initialThemeRef = useRef(initialTheme)
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
@@ -30,7 +35,8 @@ export default function MapView({ onMapReady, onError }: MapViewProps) {
 
     const init = async () => {
       try {
-        const style = await loadMapStyle()
+        const display = { basemap: 'roadmap' as const, theme: initialThemeRef.current }
+        const style = await loadMapStyle(display)
         if (cancelled || !containerRef.current) return
 
         map = new maplibregl.Map({
@@ -42,6 +48,7 @@ export default function MapView({ onMapReady, onError }: MapViewProps) {
           maxPitch: 70,
           fadeDuration: 0,
         })
+        registerMapDisplay(map, display)
 
         map.addControl(new maplibregl.ScaleControl({ maxWidth: 90, unit: 'metric' }), 'bottom-right')
 
@@ -50,7 +57,6 @@ export default function MapView({ onMapReady, onError }: MapViewProps) {
             map?.remove()
             return
           }
-          captureBasemapLayerIds(map)
           mapRef.current = map
           onMapReady(map)
           if (import.meta.env.DEV) {

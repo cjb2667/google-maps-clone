@@ -1,5 +1,50 @@
 import { describe, expect, it } from 'vitest'
-import { formatArea, formatDistance, haversine, pathLength, polygonArea } from './geo'
+import {
+  bearingBetween,
+  formatArea,
+  formatDistance,
+  haversine,
+  pathLength,
+  polygonArea,
+  slerp,
+} from './geo'
+
+describe('slerp', () => {
+  it('t=0 返回起点,t=1 返回终点', () => {
+    const a: [number, number] = [116.4, 39.9]
+    const b: [number, number] = [121.5, 31.2]
+    expect(slerp(a, b, 0)[0]).toBeCloseTo(a[0], 6)
+    expect(slerp(a, b, 0)[1]).toBeCloseTo(a[1], 6)
+    expect(slerp(a, b, 1)[0]).toBeCloseTo(b[0], 6)
+    expect(slerp(a, b, 1)[1]).toBeCloseTo(b[1], 6)
+  })
+
+  it('赤道上中点为经度中点', () => {
+    const mid = slerp([0, 0], [10, 0], 0.5)
+    expect(mid[0]).toBeCloseTo(5, 6)
+    expect(mid[1]).toBeCloseTo(0, 6)
+  })
+
+  it('两点几乎重合时不产生 NaN', () => {
+    const mid = slerp([116.4, 39.9], [116.4, 39.9], 0.5)
+    expect(mid[0]).toBeCloseTo(116.4, 6)
+    expect(mid[1]).toBeCloseTo(39.9, 6)
+  })
+})
+
+describe('bearingBetween', () => {
+  it('正北为 0 度', () => {
+    expect(bearingBetween([0, 0], [0, 10])).toBeCloseTo(0, 4)
+  })
+
+  it('正东为 90 度', () => {
+    expect(bearingBetween([0, 0], [10, 0])).toBeCloseTo(90, 4)
+  })
+
+  it('正南为 180 度', () => {
+    expect(bearingBetween([0, 10], [0, 0])).toBeCloseTo(180, 4)
+  })
+})
 
 describe('haversine', () => {
   it('同一点距离为 0', () => {
