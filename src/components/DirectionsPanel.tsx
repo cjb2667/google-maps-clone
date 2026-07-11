@@ -142,7 +142,8 @@ export default function DirectionsPanel({ active, onExit, onError }: DirectionsP
           onError((err as Error).message || '路线规划失败')
         }
       } finally {
-        setLoading(false)
+        // 仅当仍是最新请求时才清 loading,避免被 abort 的旧请求打灭新请求的状态
+        if (abortRef.current === controller) setLoading(false)
       }
     },
     [map, ensureRouteLayers, clearRoute, onError],
@@ -189,6 +190,7 @@ export default function DirectionsPanel({ active, onExit, onError }: DirectionsP
   // 退出时清理
   useEffect(() => {
     if (active) return
+    window.clearTimeout(debounceRef.current)
     abortRef.current?.abort()
     searchAbort.current?.abort()
     originMarker.current?.remove()
@@ -207,7 +209,9 @@ export default function DirectionsPanel({ active, onExit, onError }: DirectionsP
     setOriginText('')
     setDestText('')
     setSummary(null)
+    setLoading(false)
     setSuggestions([])
+    setSuggestOpen(false)
   }, [active, map, clearRoute])
 
   const searchSuggest = (q: string, field: 'origin' | 'dest') => {
@@ -272,7 +276,11 @@ export default function DirectionsPanel({ active, onExit, onError }: DirectionsP
   }
 
   const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') onExit()
+    if (e.key === 'Escape') {
+      // 先关建议下拉,再次 Esc 才退出面板
+      if (suggestOpen) setSuggestOpen(false)
+      else onExit()
+    }
   }
 
   if (!active) return null
@@ -311,6 +319,10 @@ export default function DirectionsPanel({ active, onExit, onError }: DirectionsP
             onFocus={() => setFocusField('origin')}
             onChange={(e) => {
               setOriginText(e.target.value)
+              // 文本被编辑后旧坐标不再有效,清除待重新选点
+              setOrigin(null)
+              originMarker.current?.remove()
+              originMarker.current = null
               searchSuggest(e.target.value, 'origin')
             }}
             aria-label="起点"
@@ -334,6 +346,9 @@ export default function DirectionsPanel({ active, onExit, onError }: DirectionsP
             onFocus={() => setFocusField('dest')}
             onChange={(e) => {
               setDestText(e.target.value)
+              setDestination(null)
+              destMarker.current?.remove()
+              destMarker.current = null
               searchSuggest(e.target.value, 'dest')
             }}
             aria-label="终点"

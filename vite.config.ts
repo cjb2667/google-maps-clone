@@ -4,6 +4,8 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  // 相对路径基址:兼容 GitHub Pages 子路径部署(/google-maps-clone/)
+  base: './',
   build: {
     rollupOptions: {
       output: {
