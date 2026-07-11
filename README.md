@@ -17,6 +17,9 @@ npm run dev
 - **路线规划**:OSRM 驾车 / 步行 / 骑行;搜索或点击地图设起终点,绘制路线并显示时长距离
 - **测距 / 测面积**:加点、闭合、拖拽顶点、撤销
 - **卷帘对比**:路网与卫星同屏对比
+- **历史影像时光机**:Esri Wayback 十余年卫星影像存档,拖动时间轴对比城市变迁
+- **实时航班**:airplanes.live ADS-B 数据,当前视野航班位置按航向渲染,点击看呼号/高度/速度
+- **国际空间站**:wheretheiss.at 实时位置(5s 刷新)+ 前后一圈地面轨迹
 - **3D 地形**:AWS Terrarium DEM + 山体阴影(按需加载)
 - **随机传送**:飞往精选自然奇观 / 地标
 - **定位与指北**:Geolocation 蓝点 + 精度圈;旋转后可一键复位
@@ -26,6 +29,9 @@ npm run dev
 
 - 矢量路网:© OpenStreetMap contributors © OpenFreeMap
 - 卫星瓦片:© Esri — Source: Esri, Maxar, Earthstar Geographics
+- 历史影像:Esri World Imagery Wayback
 - 地理编码:© OpenStreetMap contributors (Nominatim)
 - 路线规划:OSRM (Open Source Routing Machine)
+- 实时航班:airplanes.live(社区 ADS-B)
+- 空间站数据:wheretheiss.at
 - 高程:AWS Terrain Tiles (Terrarium)

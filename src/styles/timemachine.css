@@ -1,0 +1,59 @@
+/* 时光机:左右角标 + 底部时间轴 */
+.time-machine__badge {
+  position: absolute;
+  top: 72px;
+  z-index: 6;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(32, 33, 36, 0.75);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  pointer-events: none;
+}
+
+.time-machine__badge--left {
+  left: 12px;
+}
+
+.time-machine__badge--right {
+  right: 12px;
+}
+
+.time-machine__timeline {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: max(48px, calc(40px + env(safe-area-inset-bottom, 0px)));
+  z-index: 12;
+  width: min(480px, calc(100vw - 48px));
+  background: #fff;
+  border-radius: 12px;
+  box-shadow:
+    0 1px 2px rgba(60, 64, 67, 0.3),
+    0 2px 6px 2px rgba(60, 64, 67, 0.15);
+  padding: 10px 16px 8px;
+}
+
+.time-machine__label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: #202124;
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.time-machine__slider {
+  width: 100%;
+  accent-color: #1a73e8;
+  cursor: pointer;
+}
+
+.time-machine__ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #5f6368;
+  margin-top: 2px;
+}

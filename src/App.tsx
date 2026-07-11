@@ -23,6 +23,13 @@ import './styles/app.css'
 const MeasureTool = lazy(() => import('./components/MeasureTool'))
 const SwipeCompare = lazy(() => import('./components/SwipeCompare'))
 const DirectionsPanel = lazy(() => import('./components/DirectionsPanel'))
+const TimeMachine = lazy(() => import('./components/TimeMachine'))
+const FlightsLayer = lazy(() => import('./components/FlightsLayer'))
+const IssLayer = lazy(() => import('./components/IssLayer'))
+
+/** Wayback 历史影像署名 */
+const WAYBACK_ATTRIBUTION =
+  '© <a href="https://livingatlas.arcgis.com/wayback/" target="_blank">Esri Wayback</a> — Source: Esri, Maxar, Earthstar Geographics'
 
 /**
  * 整体布局:地图铺满全屏,各控件绝对定位悬浮在地图之上
@@ -34,10 +41,15 @@ export default function App() {
   const toastTimer = useRef<number | undefined>(undefined)
   const searchMarkerRef = useRef<maplibregl.Marker | null>(null)
 
+  // 独占模式:路线 / 测距 / 卷帘 / 时光机(同屏交互冲突,互斥)
   const [directionsOn, setDirectionsOn] = useState(false)
   const [measureOn, setMeasureOn] = useState(false)
   const [swipeOn, setSwipeOn] = useState(false)
+  const [timeMachineOn, setTimeMachineOn] = useState(false)
+  // 叠加图层:3D / 航班 / ISS(可与任意模式共存)
   const [terrainOn, setTerrainOn] = useState(false)
+  const [flightsOn, setFlightsOn] = useState(false)
+  const [issOn, setIssOn] = useState(false)
   const lastPlaceRef = useRef<Place | undefined>(undefined)
 
   const handleMapReady = useCallback((m: maplibregl.Map) => {
@@ -120,37 +132,48 @@ export default function App() {
     [map],
   )
 
-  /** 路线 / 测距 / 卷帘互斥;进入路线时清掉搜索标记 */
+  /** 关闭所有独占模式 */
+  const closeExclusiveModes = useCallback(() => {
+    setDirectionsOn(false)
+    setMeasureOn(false)
+    setSwipeOn(false)
+    setTimeMachineOn(false)
+  }, [])
+
   const handleToggleDirections = useCallback(() => {
     setDirectionsOn((on) => {
       if (!on) {
-        setMeasureOn(false)
-        setSwipeOn(false)
+        closeExclusiveModes()
         handleSearchClear()
       }
       return !on
     })
-  }, [handleSearchClear])
+  }, [closeExclusiveModes, handleSearchClear])
 
   const handleToggleMeasure = useCallback(() => {
     setMeasureOn((on) => {
-      if (!on) {
-        setDirectionsOn(false)
-        setSwipeOn(false)
-      }
+      if (!on) closeExclusiveModes()
       return !on
     })
-  }, [])
+  }, [closeExclusiveModes])
 
   const handleToggleSwipe = useCallback(() => {
     setSwipeOn((on) => {
+      if (!on) closeExclusiveModes()
+      return !on
+    })
+  }, [closeExclusiveModes])
+
+  /** 时光机:开启时切主图为卫星,便于"过去 vs 现在"对比 */
+  const handleToggleTimeMachine = useCallback(() => {
+    setTimeMachineOn((on) => {
       if (!on) {
-        setDirectionsOn(false)
-        setMeasureOn(false)
+        closeExclusiveModes()
+        handleSwitchLayer('satellite')
       }
       return !on
     })
-  }, [])
+  }, [closeExclusiveModes, handleSwitchLayer])
 
   const handleToggleTerrain = useCallback(() => {
     if (!map) return
@@ -161,6 +184,9 @@ export default function App() {
       return next
     })
   }, [map])
+
+  const handleToggleFlights = useCallback(() => setFlightsOn((on) => !on), [])
+  const handleToggleIss = useCallback(() => setIssOn((on) => !on), [])
 
   const handleTeleport = useCallback(() => {
     if (!map) return
@@ -178,6 +204,14 @@ export default function App() {
     showToast(`已传送到:${place.name}(${place.country})`)
   }, [map, terrainOn, handleSwitchLayer, showToast])
 
+  const attributionHtml = timeMachineOn
+    ? `${WAYBACK_ATTRIBUTION} | ${SATELLITE_ATTRIBUTION}`
+    : swipeOn
+      ? `${ROADMAP_ATTRIBUTION} | ${SATELLITE_ATTRIBUTION}`
+      : activeLayer === 'roadmap'
+        ? ROADMAP_ATTRIBUTION
+        : SATELLITE_ATTRIBUTION
+
   return (
     <MapProvider value={map}>
       <div className="app">
@@ -189,6 +223,9 @@ export default function App() {
             compareLayer={activeLayer === 'roadmap' ? 'satellite' : 'roadmap'}
             terrainOn={terrainOn}
           />
+          <TimeMachine active={timeMachineOn} onError={showToast} />
+          <FlightsLayer active={flightsOn} onError={showToast} />
+          <IssLayer active={issOn} onError={showToast} />
         </Suspense>
 
         {/* 路线模式下隐藏普通搜索,避免与起终点输入冲突 */}
@@ -205,10 +242,16 @@ export default function App() {
           measureOn={measureOn}
           swipeOn={swipeOn}
           terrainOn={terrainOn}
+          timeMachineOn={timeMachineOn}
+          flightsOn={flightsOn}
+          issOn={issOn}
           onToggleDirections={handleToggleDirections}
           onToggleMeasure={handleToggleMeasure}
           onToggleSwipe={handleToggleSwipe}
           onToggleTerrain={handleToggleTerrain}
+          onToggleTimeMachine={handleToggleTimeMachine}
+          onToggleFlights={handleToggleFlights}
+          onToggleIss={handleToggleIss}
           onTeleport={handleTeleport}
         />
 
@@ -221,7 +264,8 @@ export default function App() {
           <MeasureTool active={measureOn} onExit={() => setMeasureOn(false)} />
         </Suspense>
 
-        {!swipeOn && (
+        {/* 卷帘/时光机下两种影像同屏,隐藏图层切换卡片 */}
+        {!swipeOn && !timeMachineOn && (
           <div className="app__bottom-left">
             <LayerSwitcher active={activeLayer} onSwitch={handleSwitchLayer} />
           </div>
@@ -236,16 +280,7 @@ export default function App() {
           />
         </div>
 
-        <div
-          className="app__attribution"
-          dangerouslySetInnerHTML={{
-            __html: swipeOn
-              ? `${ROADMAP_ATTRIBUTION} | ${SATELLITE_ATTRIBUTION}`
-              : activeLayer === 'roadmap'
-                ? ROADMAP_ATTRIBUTION
-                : SATELLITE_ATTRIBUTION,
-          }}
-        />
+        <div className="app__attribution" dangerouslySetInnerHTML={{ __html: attributionHtml }} />
 
         {toast && (
           <div className="app__toast" role="alert">

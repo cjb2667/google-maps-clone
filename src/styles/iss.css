@@ -1,0 +1,35 @@
+/* ISS 标记:发光背景 + emoji */
+.iss-marker {
+  font-size: 26px;
+  line-height: 1;
+  filter: drop-shadow(0 0 6px rgba(251, 188, 4, 0.9));
+  cursor: default;
+  user-select: none;
+}
+
+/* ISS 信息角标 */
+.iss-chip {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: max(64px, calc(52px + env(safe-area-inset-top, 0px)));
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 16px;
+  border-radius: 12px;
+  background: rgba(32, 33, 36, 0.8);
+  color: #fff;
+  pointer-events: none;
+}
+
+.iss-chip strong {
+  font-size: 13px;
+}
+
+.iss-chip span {
+  font-size: 11px;
+  color: #dadce0;
+}

@@ -1,0 +1,31 @@
+/* 航班数量角标 */
+.flights-chip {
+  position: absolute;
+  top: max(64px, calc(52px + env(safe-area-inset-top, 0px)));
+  right: max(64px, calc(52px + env(safe-area-inset-right, 0px)));
+  z-index: 10;
+  padding: 6px 12px;
+  border-radius: 16px;
+  background: rgba(32, 33, 36, 0.75);
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+/* 航班详情弹窗内容 */
+.flight-popup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: #202124;
+  font-family: inherit;
+}
+
+.flight-popup strong {
+  font-size: 14px;
+}
+
+.flight-popup span {
+  color: #5f6368;
+}
