@@ -1,6 +1,13 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react'
 import maplibregl from 'maplibre-gl'
-import { makeCompareStyle, setTerrainEnabled, type LayerType } from '../lib/mapConfig'
+import {
+  applyBasemapVisibility,
+  captureVisibilitySnapshot,
+  loadCompareStyle,
+  setTerrainEnabled,
+  type LayerType,
+  type VisibilitySnapshot,
+} from '../lib/mapConfig'
 import { useMap } from '../lib/useMap'
 import '../styles/swipe.css'
 
@@ -20,6 +27,7 @@ export default function SwipeCompare({ active, compareLayer, terrainOn }: SwipeC
   const map = useMap()
   const containerRef = useRef<HTMLDivElement>(null)
   const compareMapRef = useRef<maplibregl.Map | null>(null)
+  const snapshotRef = useRef<VisibilitySnapshot | null>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
   const mapClipRef = useRef<HTMLDivElement>(null)
   const handleRef = useRef<HTMLDivElement>(null)
@@ -35,47 +43,84 @@ export default function SwipeCompare({ active, compareLayer, terrainOn }: SwipeC
     }
   }
 
-  // 创建/销毁对比地图;卷帘开启期间图层切换卡片隐藏,compareLayer 固定
+  // 创建/销毁对比地图(样式复用模块级缓存,不再重复拉取)
   useEffect(() => {
     if (!map || !active || !containerRef.current) return
 
-    const compareMap = new maplibregl.Map({
-      container: containerRef.current,
-      style: makeCompareStyle(compareLayer),
-      center: map.getCenter(),
-      zoom: map.getZoom(),
-      bearing: map.getBearing(),
-      pitch: map.getPitch(),
-      interactive: false,
-      attributionControl: false,
-      maxPitch: 70,
-      fadeDuration: 0,
-    })
-    compareMapRef.current = compareMap
+    let cancelled = false
+    let compareMap: maplibregl.Map | null = null
+    let detachSync: (() => void) | null = null
 
-    let raf = 0
-    const sync = () => {
-      if (raf) return
-      raf = requestAnimationFrame(() => {
-        raf = 0
-        compareMap.jumpTo({
+    const init = async () => {
+      try {
+        // compareLayer 初值仅用于首帧;后续变化由下方 effect 切换显隐
+        const style = await loadCompareStyle(compareLayer)
+        if (cancelled || !containerRef.current) return
+
+        compareMap = new maplibregl.Map({
+          container: containerRef.current,
+          style,
           center: map.getCenter(),
           zoom: map.getZoom(),
           bearing: map.getBearing(),
           pitch: map.getPitch(),
+          interactive: false,
+          attributionControl: false,
+          maxPitch: 70,
+          fadeDuration: 0,
         })
-      })
+        compareMapRef.current = compareMap
+
+        compareMap.once('load', () => {
+          if (compareMap) snapshotRef.current = captureVisibilitySnapshot(compareMap)
+        })
+
+        let raf = 0
+        const sync = () => {
+          if (raf) return
+          raf = requestAnimationFrame(() => {
+            raf = 0
+            compareMap?.jumpTo({
+              center: map.getCenter(),
+              zoom: map.getZoom(),
+              bearing: map.getBearing(),
+              pitch: map.getPitch(),
+            })
+          })
+        }
+        map.on('move', sync)
+        detachSync = () => {
+          map.off('move', sync)
+          cancelAnimationFrame(raf)
+        }
+      } catch {
+        // 样式加载失败时静默;主图 onError 已有提示
+      }
     }
-    map.on('move', sync)
+    void init()
 
     return () => {
-      map.off('move', sync)
-      cancelAnimationFrame(raf)
-      compareMap.remove()
+      cancelled = true
+      detachSync?.()
+      compareMap?.remove()
       compareMapRef.current = null
+      snapshotRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, active])
+
+  // 对比图层切换(含随机传送切主图为卫星的场景):按快照显隐,不重建地图
+  useEffect(() => {
+    const compareMap = compareMapRef.current
+    if (!compareMap || !active) return
+    const apply = () => {
+      const snap = snapshotRef.current ?? captureVisibilitySnapshot(compareMap)
+      snapshotRef.current = snap
+      applyBasemapVisibility(compareMap, snap, compareLayer)
+    }
+    if (compareMap.isStyleLoaded()) apply()
+    else compareMap.once('load', apply)
+  }, [active, compareLayer])
 
   // 3D 地形开关同步到对比图
   useEffect(() => {

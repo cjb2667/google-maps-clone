@@ -1,5 +1,5 @@
 import type { Feature, LineString } from 'geojson'
-import { formatDistance } from './geo'
+import { formatDistance, haversine } from './geo'
 
 /** 出行方式:对应 OSRM profile */
 export type TravelMode = 'driving' | 'walking' | 'cycling'
@@ -54,6 +54,10 @@ export async function fetchRoute(
   mode: TravelMode,
   signal?: AbortSignal,
 ): Promise<RouteResult> {
+  // 起终点过近(<10 米)直接短路,避免无意义请求
+  if (haversine([from.lng, from.lat], [to.lng, to.lat]) < 10) {
+    throw new Error('起点与终点距离过近')
+  }
   const coords = `${from.lng},${from.lat};${to.lng},${to.lat}`
   const url =
     `${OSRM_BASE}/route/v1/${mode}/${coords}` +

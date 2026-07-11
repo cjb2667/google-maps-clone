@@ -120,16 +120,17 @@ export default function App() {
     [map],
   )
 
-  /** 路线 / 测距 / 卷帘互斥 */
+  /** 路线 / 测距 / 卷帘互斥;进入路线时清掉搜索标记 */
   const handleToggleDirections = useCallback(() => {
     setDirectionsOn((on) => {
       if (!on) {
         setMeasureOn(false)
         setSwipeOn(false)
+        handleSearchClear()
       }
       return !on
     })
-  }, [])
+  }, [handleSearchClear])
 
   const handleToggleMeasure = useCallback(() => {
     setMeasureOn((on) => {

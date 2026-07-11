@@ -34,14 +34,15 @@ const SATELLITE_TILES = [
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
 ]
 
-/** 样式加载时记录的矢量底图层 id(不含卫星/自定义业务层) */
-let basemapLayerIds: string[] = []
+/** 样式加载时记录的主图各层原始可见性(不含卫星层) */
+export type VisibilitySnapshot = Record<string, 'visible' | 'none'>
 
-/**
- * 拉取 OpenFreeMap 矢量样式,并注入卫星栅格层(默认隐藏)。
- * 通过显隐切换路网/卫星,避免 setStyle 导致业务图层丢失。
- */
-export async function loadMapStyle(): Promise<StyleSpecification> {
+let mainSnapshot: VisibilitySnapshot = {}
+
+/** 模块级样式缓存:主图 / 卷帘 / StrictMode 双挂载共享一次网络请求 */
+let stylePromise: Promise<StyleSpecification> | null = null
+
+async function fetchStyleWithSatellite(): Promise<StyleSpecification> {
   const res = await fetch(VECTOR_STYLE_URL)
   if (!res.ok) throw new Error(`矢量样式加载失败: ${res.status}`)
   const style = (await res.json()) as StyleSpecification
@@ -71,54 +72,76 @@ export async function loadMapStyle(): Promise<StyleSpecification> {
   return style
 }
 
-/** 地图 load 后调用:记下当前底图层,供路网/卫星切换 */
-export function captureBasemapLayerIds(map: MapLibreMap): void {
-  basemapLayerIds = (map.getStyle().layers ?? [])
-    .map((l) => l.id)
-    .filter((id) => id !== SATELLITE_LAYER_ID)
+/**
+ * 拉取 OpenFreeMap 矢量样式并注入卫星栅格层(默认隐藏)。
+ * 结果缓存;每次返回深拷贝,避免多张地图共享可变对象。
+ */
+export async function loadMapStyle(): Promise<StyleSpecification> {
+  if (!stylePromise) {
+    stylePromise = fetchStyleWithSatellite().catch((err) => {
+      // 失败不缓存,下次可重试
+      stylePromise = null
+      throw err
+    })
+  }
+  const style = await stylePromise
+  return JSON.parse(JSON.stringify(style)) as StyleSpecification
 }
 
-/** 切换路网(矢量) / 卫星;山影由地形开关单独控制 */
-export function setBasemap(map: MapLibreMap, layer: LayerType): void {
+/** 生成卷帘对比图样式:复用缓存,按指定底图预置可见性 */
+export async function loadCompareStyle(visibleLayer: LayerType): Promise<StyleSpecification> {
+  const style = await loadMapStyle()
+  for (const layer of style.layers) {
+    if (layer.id === SATELLITE_LAYER_ID) {
+      layer.layout = {
+        ...layer.layout,
+        visibility: visibleLayer === 'satellite' ? 'visible' : 'none',
+      }
+    } else if (visibleLayer === 'satellite') {
+      layer.layout = { ...layer.layout, visibility: 'none' }
+    }
+  }
+  return style
+}
+
+/** 记录一张地图当前各层可见性(卫星层除外),供底图切换时按原样恢复 */
+export function captureVisibilitySnapshot(map: MapLibreMap): VisibilitySnapshot {
+  const snap: VisibilitySnapshot = {}
+  for (const layer of map.getStyle().layers ?? []) {
+    if (layer.id === SATELLITE_LAYER_ID) continue
+    snap[layer.id] =
+      (layer.layout as { visibility?: 'visible' | 'none' } | undefined)?.visibility ?? 'visible'
+  }
+  return snap
+}
+
+/** 主图 load 后调用:保存矢量层可见性快照 */
+export function captureBasemapLayerIds(map: MapLibreMap): void {
+  mainSnapshot = captureVisibilitySnapshot(map)
+}
+
+/**
+ * 按快照切换路网(矢量) / 卫星:
+ * 切回路网时恢复各层原始可见性,而非一律设为 visible
+ */
+export function applyBasemapVisibility(
+  map: MapLibreMap,
+  snapshot: VisibilitySnapshot,
+  layer: LayerType,
+): void {
   const showRoad = layer === 'roadmap'
-  for (const id of basemapLayerIds) {
+  for (const [id, vis] of Object.entries(snapshot)) {
     if (!map.getLayer(id) || id === HILLSHADE_LAYER_ID) continue
-    map.setLayoutProperty(id, 'visibility', showRoad ? 'visible' : 'none')
+    map.setLayoutProperty(id, 'visibility', showRoad ? vis : 'none')
   }
   if (map.getLayer(SATELLITE_LAYER_ID)) {
     map.setLayoutProperty(SATELLITE_LAYER_ID, 'visibility', showRoad ? 'none' : 'visible')
   }
 }
 
-/** 仅卫星的样式(供卷帘对比图使用) */
-export function makeSatelliteStyle(): StyleSpecification {
-  return {
-    version: 8,
-    sources: {
-      [SATELLITE_SOURCE]: {
-        type: 'raster',
-        tiles: SATELLITE_TILES,
-        tileSize: 256,
-        maxzoom: 19,
-      },
-    },
-    layers: [
-      {
-        id: SATELLITE_LAYER_ID,
-        type: 'raster',
-        source: SATELLITE_SOURCE,
-        layout: { visibility: 'visible' },
-      },
-    ],
-  }
-}
-
-/**
- * 生成卷帘对比图样式:路网用矢量 URL,卫星用栅格样式。
- * 返回 string 时 MapLibre 会自行拉取样式 JSON。
- */
-export function makeCompareStyle(visibleLayer: LayerType): string | StyleSpecification {
-  return visibleLayer === 'roadmap' ? VECTOR_STYLE_URL : makeSatelliteStyle()
+/** 主图切换路网 / 卫星 */
+export function setBasemap(map: MapLibreMap, layer: LayerType): void {
+  applyBasemapVisibility(map, mainSnapshot, layer)
 }
 
 /** 按需挂载 DEM + hillshade(幂等) */
@@ -142,13 +165,20 @@ export function ensureTerrainSources(map: MapLibreMap): void {
     })
   }
   if (!map.getLayer(HILLSHADE_LAYER_ID)) {
-    map.addLayer({
-      id: HILLSHADE_LAYER_ID,
-      type: 'hillshade',
-      source: HILLSHADE_SOURCE,
-      layout: { visibility: 'none' },
-      paint: { 'hillshade-exaggeration': 0.4 },
-    })
+    // 插在业务图层(路线/测距/定位)之下,避免山影盖住它们
+    const businessLayer = (map.getStyle().layers ?? []).find((l) =>
+      /^(directions-|measure-|user-)/.test(l.id),
+    )
+    map.addLayer(
+      {
+        id: HILLSHADE_LAYER_ID,
+        type: 'hillshade',
+        source: HILLSHADE_SOURCE,
+        layout: { visibility: 'none' },
+        paint: { 'hillshade-exaggeration': 0.4 },
+      },
+      businessLayer?.id,
+    )
   }
 }
 
