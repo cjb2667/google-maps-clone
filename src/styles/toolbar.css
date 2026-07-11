@@ -1,8 +1,8 @@
 /* 右上角功能工具栏:白底方块按钮组,Material 阴影 */
 .toolbar {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: max(12px, env(safe-area-inset-top, 0px));
+  right: max(12px, env(safe-area-inset-right, 0px));
   z-index: 10;
   display: flex;
   flex-direction: column;

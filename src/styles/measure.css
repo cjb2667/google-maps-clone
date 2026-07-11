@@ -15,11 +15,12 @@
 /* 底部居中的测量信息面板 */
 .measure-panel {
   position: absolute;
-  bottom: 48px;
+  bottom: max(48px, calc(40px + env(safe-area-inset-bottom, 0px)));
   left: 50%;
   transform: translateX(-50%);
   z-index: 12;
   min-width: 260px;
+  max-width: calc(100vw - 24px);
   background: #fff;
   border-radius: 12px;
   box-shadow:
@@ -70,6 +71,15 @@
 
 .measure-panel__btn:hover {
   background: rgba(26, 115, 232, 0.08);
+}
+
+.measure-panel__btn:disabled {
+  color: #9aa0a6;
+  cursor: default;
+}
+
+.measure-panel__btn:disabled:hover {
+  background: transparent;
 }
 
 .measure-panel__btn--primary {

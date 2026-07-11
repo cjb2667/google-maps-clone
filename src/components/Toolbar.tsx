@@ -28,7 +28,9 @@ export default function Toolbar({
         className={`toolbar__btn${measureOn ? ' toolbar__btn--active' : ''}`}
         onClick={onToggleMeasure}
         aria-pressed={measureOn}
+        aria-label="测距 / 测面积"
         title="测距 / 测面积"
+        type="button"
       >
         {/* 直尺图标 */}
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -39,7 +41,9 @@ export default function Toolbar({
         className={`toolbar__btn${swipeOn ? ' toolbar__btn--active' : ''}`}
         onClick={onToggleSwipe}
         aria-pressed={swipeOn}
+        aria-label="卷帘对比(路网 / 卫星)"
         title="卷帘对比(路网 / 卫星)"
+        type="button"
       >
         {/* 左右分屏对比图标 */}
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -50,14 +54,22 @@ export default function Toolbar({
         className={`toolbar__btn${terrainOn ? ' toolbar__btn--active' : ''}`}
         onClick={onToggleTerrain}
         aria-pressed={terrainOn}
+        aria-label="3D 地形"
         title="3D 地形"
+        type="button"
       >
         {/* 山峰图标 */}
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
           <path d="M14 6l-3.75 5 2.85 3.8-1.6 1.2C9.81 13.75 7 10 7 10l-6 8h22L14 6z" />
         </svg>
       </button>
-      <button className="toolbar__btn" onClick={onTeleport} title="随机传送(云旅游盲盒)">
+      <button
+        className="toolbar__btn"
+        onClick={onTeleport}
+        aria-label="随机传送"
+        title="随机传送(云旅游盲盒)"
+        type="button"
+      >
         {/* 骰子图标 */}
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
           <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM7.5 18a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm0-9a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm4.5 4.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm4.5 4.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm0-9a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z" />

@@ -79,19 +79,19 @@ export const MAP_STYLE: StyleSpecification = {
       layout: { visibility: 'visible' },
     },
     {
-      // 山体阴影:开启 3D 时叠加在路网之上,增强地形立体感(默认隐藏)
-      id: HILLSHADE_LAYER_ID,
-      type: 'hillshade',
-      source: HILLSHADE_SOURCE,
-      layout: { visibility: 'none' },
-      paint: { 'hillshade-exaggeration': 0.4 },
-    },
-    {
       id: SATELLITE_LAYER_ID,
       type: 'raster',
       source: 'satellite',
       // 卫星图层默认隐藏
       layout: { visibility: 'none' },
+    },
+    {
+      // 山体阴影放在两种底图之上,卫星 + 3D 时也能看见立体感(默认隐藏)
+      id: HILLSHADE_LAYER_ID,
+      type: 'hillshade',
+      source: HILLSHADE_SOURCE,
+      layout: { visibility: 'none' },
+      paint: { 'hillshade-exaggeration': 0.4 },
     },
   ],
 }

@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { searchPlaces, type GeocodeResult } from '../lib/geocode'
 import '../styles/searchbar.css'
 
 interface SearchBarProps {
   /** 用户从下拉列表选中某个地点时回调 */
   onSelect: (result: GeocodeResult) => void
+  /** 清空搜索/清除标记时回调 */
+  onClear?: () => void
   /** 搜索出错时向上抛出提示文案 */
   onError: (message: string) => void
 }
@@ -13,7 +15,7 @@ interface SearchBarProps {
  * 左上角搜索框:接入 Nominatim 地理编码,
  * 输入防抖联想 + 回车直接搜索,选中后飞到目标位置
  */
-export default function SearchBar({ onSelect, onError }: SearchBarProps) {
+export default function SearchBar({ onSelect, onClear, onError }: SearchBarProps) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<GeocodeResult[]>([])
   const [open, setOpen] = useState(false)
@@ -23,6 +25,7 @@ export default function SearchBar({ onSelect, onError }: SearchBarProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const debounceRef = useRef<number | undefined>(undefined)
+  const listboxId = useId()
 
   /** 发起搜索请求(取消上一次未完成的请求) */
   const doSearch = async (q: string) => {
@@ -35,15 +38,25 @@ export default function SearchBar({ onSelect, onError }: SearchBarProps) {
       setResults(list)
       setOpen(true)
       setHighlight(-1)
-      if (list.length === 0) setOpen(true) // 展示"未找到结果"
     } catch (err) {
       // 主动取消不算错误
       if ((err as Error).name !== 'AbortError') {
-        onError('搜索失败,请检查网络后重试')
+        onError((err as Error).message.includes('频繁') ? (err as Error).message : '搜索失败,请检查网络后重试')
       }
     } finally {
       setLoading(false)
     }
+  }
+
+  /** 清空输入与结果,并通知父组件移除标记 */
+  const handleClear = () => {
+    window.clearTimeout(debounceRef.current)
+    abortRef.current?.abort()
+    setQuery('')
+    setResults([])
+    setOpen(false)
+    setHighlight(-1)
+    onClear?.()
   }
 
   /** 输入变化:400ms 防抖后自动联想 */
@@ -53,6 +66,7 @@ export default function SearchBar({ onSelect, onError }: SearchBarProps) {
     if (value.trim().length < 2) {
       setResults([])
       setOpen(false)
+      if (value.trim().length === 0) onClear?.()
       return
     }
     debounceRef.current = window.setTimeout(() => doSearch(value.trim()), 400)
@@ -66,7 +80,7 @@ export default function SearchBar({ onSelect, onError }: SearchBarProps) {
   }
 
   /** 键盘操作:上下选择、回车确认/搜索、Esc 关闭 */
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault()
       if (open && highlight >= 0 && highlight < results.length) {
@@ -108,30 +122,46 @@ export default function SearchBar({ onSelect, onError }: SearchBarProps) {
     [],
   )
 
+  const activeOptionId =
+    open && highlight >= 0 && highlight < results.length ? `${listboxId}-opt-${highlight}` : undefined
+
   return (
     <div className="search-bar-root" ref={rootRef}>
       <div className={`search-bar${open ? ' search-bar--open' : ''}`} role="search">
-        {/* 汉堡菜单图标 */}
-        <button className="search-bar__icon-btn" aria-label="菜单" title="菜单">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="#5f6368">
-            <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
-          </svg>
-        </button>
         <input
           className="search-bar__input"
           type="text"
-          placeholder="在谷歌地图中搜索"
-          aria-label="搜索"
+          placeholder="搜索地点"
+          aria-label="搜索地点"
+          aria-autocomplete="list"
+          aria-expanded={open}
+          aria-controls={listboxId}
+          aria-activedescendant={activeOptionId}
+          role="combobox"
           value={query}
           onChange={(e) => handleChange(e.target.value)}
           onKeyDown={handleKeyDown}
           onFocus={() => results.length > 0 && setOpen(true)}
         />
-        {/* 放大镜图标:点击直接搜索 */}
+        {/* 有内容时显示清除,否则显示搜索 */}
+        {query ? (
+          <button
+            className="search-bar__icon-btn"
+            aria-label="清除搜索"
+            title="清除"
+            type="button"
+            onClick={handleClear}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="#5f6368">
+              <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z" />
+            </svg>
+          </button>
+        ) : null}
         <button
           className="search-bar__icon-btn"
           aria-label="搜索"
           title="搜索"
+          type="button"
           onClick={() => query.trim() && doSearch(query.trim())}
         >
           {loading ? (
@@ -142,27 +172,18 @@ export default function SearchBar({ onSelect, onError }: SearchBarProps) {
             </svg>
           )}
         </button>
-        {/* 路线图标(仅外观) */}
-        <button
-          className="search-bar__icon-btn search-bar__directions"
-          aria-label="路线"
-          title="路线"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="#4285F4">
-            <path d="M21.71 11.29l-9-9a.996.996 0 0 0-1.41 0l-9 9a.996.996 0 0 0 0 1.41l9 9c.39.39 1.02.39 1.41 0l9-9a.996.996 0 0 0 0-1.41zM14 14.5V12h-4v3H8v-4c0-.55.45-1 1-1h5V7.5l3.5 3.5-3.5 3.5z" />
-          </svg>
-        </button>
       </div>
 
       {/* 搜索结果下拉列表 */}
       {open && (
-        <ul className="search-results" role="listbox">
+        <ul className="search-results" role="listbox" id={listboxId}>
           {results.length === 0 ? (
             <li className="search-results__empty">未找到相关地点</li>
           ) : (
             results.map((r, i) => (
               <li
                 key={r.id}
+                id={`${listboxId}-opt-${i}`}
                 role="option"
                 aria-selected={i === highlight}
                 className={`search-results__item${i === highlight ? ' search-results__item--active' : ''}`}

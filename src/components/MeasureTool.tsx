@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import type { Feature, FeatureCollection, LineString } from 'geojson'
 import { formatArea, formatDistance, haversine, pathLength, polygonArea } from '../lib/geo'
+import { useMap } from '../lib/useMap'
 import '../styles/measure.css'
 
 interface MeasureToolProps {
-  map: maplibregl.Map | null
   active: boolean
   /** 用户点击"退出"或按 Esc 时回调,由父组件关闭测量模式 */
   onExit: () => void
@@ -36,10 +36,12 @@ const EMPTY_FC: FeatureCollection = { type: 'FeatureCollection', features: [] }
  * 点击加点、双击结束、点击起点闭合成多边形测面积、拖拽顶点实时调整,
  * 每段中点用 HTML 标签显示该段距离
  */
-export default function MeasureTool({ map, active, onExit }: MeasureToolProps) {
+export default function MeasureTool({ active, onExit }: MeasureToolProps) {
+  const map = useMap()
   const [stats, setStats] = useState<Stats | null>(null)
   // 供面板"清除"按钮调用 effect 内部的重置函数
   const clearRef = useRef<(() => void) | null>(null)
+  const undoRef = useRef<(() => void) | null>(null)
   const onExitRef = useRef(onExit)
   onExitRef.current = onExit
 
@@ -54,6 +56,7 @@ export default function MeasureTool({ map, active, onExit }: MeasureToolProps) {
     let closed = false
     let drawing = true
     let labelMarkers: maplibregl.Marker[] = []
+    let statsRaf = 0
 
     // ---- 初始化 source 与 layer ----
     map.addSource(GEO_SOURCE, { type: 'geojson', data: EMPTY_FC })
@@ -100,8 +103,33 @@ export default function MeasureTool({ map, active, onExit }: MeasureToolProps) {
     map.getCanvas().style.cursor = 'crosshair'
     map.doubleClickZoom.disable()
 
+    /** 复用或补齐段距离标签,避免拖拽时反复创建 DOM */
+    const syncLabels = (segments: [[number, number], [number, number]][]) => {
+      while (labelMarkers.length > segments.length) {
+        labelMarkers.pop()?.remove()
+      }
+      for (let i = 0; i < segments.length; i++) {
+        const [a, b] = segments[i]
+        const text = formatDistance(haversine(a, b))
+        const lngLat: [number, number] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+        const existing = labelMarkers[i]
+        if (existing) {
+          const el = existing.getElement()
+          if (el.textContent !== text) el.textContent = text
+          existing.setLngLat(lngLat)
+        } else {
+          const el = document.createElement('div')
+          el.className = 'measure-label'
+          el.textContent = text
+          labelMarkers.push(
+            new maplibregl.Marker({ element: el }).setLngLat(lngLat).addTo(map),
+          )
+        }
+      }
+    }
+
     /** 重新计算图形、段距离标签与统计面板 */
-    const update = () => {
+    const update = (opts?: { throttleStats?: boolean }) => {
       const features: Feature[] = []
       if (vertices.length >= 2) {
         const lineCoords = closed ? [...vertices, vertices[0]] : vertices
@@ -131,29 +159,25 @@ export default function MeasureTool({ map, active, onExit }: MeasureToolProps) {
         })),
       })
 
-      // 重建段距离标签(每段中点一个小标签)
-      labelMarkers.forEach((m) => m.remove())
-      labelMarkers = []
       const segments: [[number, number], [number, number]][] = []
       for (let i = 1; i < vertices.length; i++) segments.push([vertices[i - 1], vertices[i]])
       if (closed && vertices.length >= 3) segments.push([vertices[vertices.length - 1], vertices[0]])
-      for (const [a, b] of segments) {
-        const el = document.createElement('div')
-        el.className = 'measure-label'
-        el.textContent = formatDistance(haversine(a, b))
-        labelMarkers.push(
-          new maplibregl.Marker({ element: el })
-            .setLngLat([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2])
-            .addTo(map),
-        )
-      }
+      syncLabels(segments)
 
-      setStats({
+      const nextStats: Stats = {
         count: vertices.length,
         total: pathLength(vertices, closed),
         area: closed && vertices.length >= 3 ? polygonArea(vertices) : null,
         drawing,
-      })
+      }
+
+      // 拖拽顶点时用 rAF 合并面板更新,减少 React 重渲染
+      if (opts?.throttleStats) {
+        cancelAnimationFrame(statsRaf)
+        statsRaf = requestAnimationFrame(() => setStats(nextStats))
+      } else {
+        setStats(nextStats)
+      }
     }
 
     const clearPreview = () => {
@@ -170,17 +194,31 @@ export default function MeasureTool({ map, active, onExit }: MeasureToolProps) {
     }
     clearRef.current = clear
 
+    /** 撤销上一个顶点 */
+    const undo = () => {
+      if (vertices.length === 0) return
+      if (closed) {
+        closed = false
+        drawing = true
+      } else {
+        vertices.pop()
+      }
+      if (vertices.length === 0) clearPreview()
+      update()
+    }
+    undoRef.current = undo
+
     // ---- 交互事件 ----
     const onClick = (e: maplibregl.MapMouseEvent) => {
       if (!drawing) return
       // 双击产生的第二次 click 不加点(detail > 1)
       if ((e.originalEvent as MouseEvent).detail > 1) return
-      // 点击起点(且已有 >=3 个点)则闭合成多边形
+      // 点击起点(且已有 >=3 个点)则闭合成多边形;触控阈值略放宽
       if (vertices.length >= 3) {
         const first = map.project(vertices[0])
         const dx = first.x - e.point.x
         const dy = first.y - e.point.y
-        if (Math.sqrt(dx * dx + dy * dy) < 12) {
+        if (Math.sqrt(dx * dx + dy * dy) < 18) {
           closed = true
           drawing = false
           clearPreview()
@@ -224,10 +262,12 @@ export default function MeasureTool({ map, active, onExit }: MeasureToolProps) {
       const idx = feature.properties.idx as number
       const onMove = (ev: maplibregl.MapMouseEvent) => {
         vertices[idx] = [ev.lngLat.lng, ev.lngLat.lat]
-        update()
+        update({ throttleStats: true })
       }
       const onUp = () => {
         map.off('mousemove', onMove)
+        // 松手时立刻刷新一次面板
+        update()
       }
       map.on('mousemove', onMove)
       map.once('mouseup', onUp)
@@ -243,6 +283,15 @@ export default function MeasureTool({ map, active, onExit }: MeasureToolProps) {
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onExitRef.current()
+      // Ctrl/Cmd+Z 或 Backspace 撤销上一点
+      if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault()
+        undo()
+      }
+      if (e.key === 'Backspace' && !(e.target instanceof HTMLInputElement)) {
+        e.preventDefault()
+        undo()
+      }
     }
 
     map.on('click', onClick)
@@ -257,6 +306,7 @@ export default function MeasureTool({ map, active, onExit }: MeasureToolProps) {
 
     // ---- 清理 ----
     return () => {
+      cancelAnimationFrame(statsRaf)
       map.off('click', onClick)
       map.off('dblclick', onDblClick)
       map.off('mousemove', onMouseMove)
@@ -274,6 +324,7 @@ export default function MeasureTool({ map, active, onExit }: MeasureToolProps) {
       map.getCanvas().style.cursor = ''
       map.doubleClickZoom.enable()
       clearRef.current = null
+      undoRef.current = null
       setStats(null)
     }
   }, [map, active])
@@ -299,12 +350,19 @@ export default function MeasureTool({ map, active, onExit }: MeasureToolProps) {
           )}
           <div className="measure-panel__hint">
             {stats.drawing
-              ? '双击结束绘制;点击起点可闭合测面积;拖拽顶点可调整'
-              : '拖拽顶点可继续调整'}
+              ? '双击结束;点击起点闭合测面积;Backspace 撤销;拖拽顶点可调整'
+              : '拖拽顶点可继续调整;Backspace 可取消闭合'}
           </div>
         </>
       )}
       <div className="measure-panel__actions">
+        <button
+          className="measure-panel__btn"
+          onClick={() => undoRef.current?.()}
+          disabled={stats.count === 0}
+        >
+          撤销
+        </button>
         <button className="measure-panel__btn" onClick={() => clearRef.current?.()}>
           清除
         </button>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import MapView from './components/MapView'
 import SearchBar from './components/SearchBar'
@@ -6,8 +6,6 @@ import LayerSwitcher from './components/LayerSwitcher'
 import ZoomControls from './components/ZoomControls'
 import LocateButton from './components/LocateButton'
 import Toolbar from './components/Toolbar'
-import MeasureTool from './components/MeasureTool'
-import SwipeCompare from './components/SwipeCompare'
 import {
   HILLSHADE_LAYER_ID,
   ROADMAP_ATTRIBUTION,
@@ -18,10 +16,15 @@ import {
   TERRAIN_SOURCE,
   type LayerType,
 } from './lib/mapConfig'
+import { MapProvider } from './lib/MapContext'
 import { locateAndFly } from './lib/userLocation'
 import type { GeocodeResult } from './lib/geocode'
 import { randomPlace, type Place } from './lib/places'
 import './styles/app.css'
+
+// 测距 / 卷帘按需加载,减小首屏 JS
+const MeasureTool = lazy(() => import('./components/MeasureTool'))
+const SwipeCompare = lazy(() => import('./components/SwipeCompare'))
 
 /**
  * 整体布局:地图铺满全屏,各控件绝对定位悬浮在地图之上
@@ -48,12 +51,39 @@ export default function App() {
     }
   }, [])
 
-  // 打开页面自动定位到当前位置(失败时静默,不打扰用户)
+  // 仅在已授权定位时自动飞到当前位置,避免首屏弹出权限请求
   useEffect(() => {
     if (!map) return
-    const run = () => locateAndFly(map)
-    if (map.loaded()) run()
-    else map.once('load', run)
+    const run = async () => {
+      try {
+        const status = await navigator.permissions?.query({ name: 'geolocation' })
+        if (status?.state === 'granted') locateAndFly(map)
+      } catch {
+        // Permissions API 不可用时跳过自动定位
+      }
+    }
+    if (map.loaded()) void run()
+    else map.once('load', () => void run())
+  }, [map])
+
+  // 地图错误提示 + 卸载时清理搜索标记
+  useEffect(() => {
+    if (!map) return
+    const onError = (e: maplibregl.ErrorEvent) => {
+      const msg = e.error?.message ?? '地图加载出错'
+      // 瓦片偶发失败不打扰;仅提示明显错误
+      if (/failed|error|denied/i.test(msg)) {
+        setToast('地图资源加载失败,请检查网络')
+        window.clearTimeout(toastTimer.current)
+        toastTimer.current = window.setTimeout(() => setToast(null), 4000)
+      }
+    }
+    map.on('error', onError)
+    return () => {
+      map.off('error', onError)
+      searchMarkerRef.current?.remove()
+      searchMarkerRef.current = null
+    }
   }, [map])
 
   /** 切换路网/卫星图层:通过图层显隐实现,不重建样式 */
@@ -83,6 +113,12 @@ export default function App() {
   }, [])
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), [])
+
+  /** 清除搜索标记 */
+  const handleSearchClear = useCallback(() => {
+    searchMarkerRef.current?.remove()
+    searchMarkerRef.current = null
+  }, [])
 
   /** 搜索选中地点:放置红色标记并飞到目标位置 */
   const handleSearchSelect = useCallback(
@@ -158,70 +194,79 @@ export default function App() {
   }, [map, terrainOn, handleSwitchLayer, showToast])
 
   return (
-    <div className="app">
-      <MapView onMapReady={handleMapReady} />
+    <MapProvider value={map}>
+      <div className="app">
+        <MapView onMapReady={handleMapReady} />
 
-      {/* 卷帘对比覆盖层(需在各控件之下) */}
-      <SwipeCompare
-        map={map}
-        active={swipeOn}
-        compareLayer={activeLayer === 'roadmap' ? 'satellite' : 'roadmap'}
-        terrainOn={terrainOn}
-      />
+        {/* 卷帘对比覆盖层(需在各控件之下) */}
+        <Suspense fallback={null}>
+          <SwipeCompare
+            active={swipeOn}
+            compareLayer={activeLayer === 'roadmap' ? 'satellite' : 'roadmap'}
+            terrainOn={terrainOn}
+          />
+        </Suspense>
 
-      {/* 左上角:搜索框(接入 Nominatim 地点搜索) */}
-      <SearchBar onSelect={handleSearchSelect} onError={showToast} />
-
-      {/* 右上角:功能工具栏 */}
-      <Toolbar
-        measureOn={measureOn}
-        swipeOn={swipeOn}
-        terrainOn={terrainOn}
-        onToggleMeasure={handleToggleMeasure}
-        onToggleSwipe={handleToggleSwipe}
-        onToggleTerrain={handleToggleTerrain}
-        onTeleport={handleTeleport}
-      />
-
-      {/* 测量模式:地图交互 + 底部信息面板 */}
-      <MeasureTool map={map} active={measureOn} onExit={() => setMeasureOn(false)} />
-
-      {/* 左下角:图层切换卡片(卷帘模式下两种图层同屏,隐藏切换卡片) */}
-      {!swipeOn && (
-        <div className="app__bottom-left">
-          <LayerSwitcher active={activeLayer} onSwitch={handleSwitchLayer} />
-        </div>
-      )}
-
-      {/* 右下角:定位按钮 + 缩放按钮组 */}
-      <div className="app__bottom-right">
-        <LocateButton map={map} onError={showToast} />
-        <ZoomControls
-          onZoomIn={() => map?.zoomIn({ duration: 300 })}
-          onZoomOut={() => map?.zoomOut({ duration: 300 })}
+        {/* 左上角:搜索框(接入 Nominatim 地点搜索) */}
+        <SearchBar
+          onSelect={handleSearchSelect}
+          onClear={handleSearchClear}
+          onError={showToast}
         />
-      </div>
 
-      {/* 底部版权条:根据当前图层展示对应署名 */}
-      <div
-        className="app__attribution"
-        // 署名文案来自本地常量,包含安全的链接 HTML
-        dangerouslySetInnerHTML={{
-          // 卷帘模式下两种图层同屏,同时展示两份署名
-          __html: swipeOn
-            ? `${ROADMAP_ATTRIBUTION} | ${SATELLITE_ATTRIBUTION}`
-            : activeLayer === 'roadmap'
-              ? ROADMAP_ATTRIBUTION
-              : SATELLITE_ATTRIBUTION,
-        }}
-      />
+        {/* 右上角:功能工具栏 */}
+        <Toolbar
+          measureOn={measureOn}
+          swipeOn={swipeOn}
+          terrainOn={terrainOn}
+          onToggleMeasure={handleToggleMeasure}
+          onToggleSwipe={handleToggleSwipe}
+          onToggleTerrain={handleToggleTerrain}
+          onTeleport={handleTeleport}
+        />
 
-      {/* 定位失败等提示 */}
-      {toast && (
-        <div className="app__toast" role="alert">
-          {toast}
+        {/* 测量模式:地图交互 + 底部信息面板 */}
+        <Suspense fallback={null}>
+          <MeasureTool active={measureOn} onExit={() => setMeasureOn(false)} />
+        </Suspense>
+
+        {/* 左下角:图层切换卡片(卷帘模式下两种图层同屏,隐藏切换卡片) */}
+        {!swipeOn && (
+          <div className="app__bottom-left">
+            <LayerSwitcher active={activeLayer} onSwitch={handleSwitchLayer} />
+          </div>
+        )}
+
+        {/* 右下角:定位按钮 + 缩放按钮组 */}
+        <div className="app__bottom-right">
+          <LocateButton onError={showToast} />
+          <ZoomControls
+            onZoomIn={() => map?.zoomIn({ duration: 300 })}
+            onZoomOut={() => map?.zoomOut({ duration: 300 })}
+          />
         </div>
-      )}
-    </div>
+
+        {/* 底部版权条:根据当前图层展示对应署名 */}
+        <div
+          className="app__attribution"
+          // 署名文案来自本地常量,包含安全的链接 HTML
+          dangerouslySetInnerHTML={{
+            // 卷帘模式下两种图层同屏,同时展示两份署名
+            __html: swipeOn
+              ? `${ROADMAP_ATTRIBUTION} | ${SATELLITE_ATTRIBUTION}`
+              : activeLayer === 'roadmap'
+                ? ROADMAP_ATTRIBUTION
+                : SATELLITE_ATTRIBUTION,
+          }}
+        />
+
+        {/* 定位失败等提示 */}
+        {toast && (
+          <div className="app__toast" role="alert">
+            {toast}
+          </div>
+        )}
+      </div>
+    </MapProvider>
   )
 }
